@@ -27,7 +27,7 @@ from forecast import (
     salvar_forecast,
     validar_lucro_bruto,
 )
-from auth import mostrar_banner_ambiente, require_password
+from auth import mostrar_banner_ambiente, pedir_senha_edicao_forecast, pode_editar_forecast, require_password
 
 st.set_page_config(page_title="Forecast", page_icon="🔮", layout="wide")
 require_password()
@@ -38,8 +38,13 @@ st.caption(
     "fechado ainda ficam editáveis (não faz sentido prever um resultado que já está posto); "
     "renomeie projetos e adicione ou exclua linhas à vontade (ícone no fim de cada linha / botão "
     "'+' no rodapé da tabela). Preencha também a Margem Bruta % dos meses em aberto pra fechar o "
-    "Custo/Lucro Bruto na DRE. Fica tudo salvo neste computador."
+    "Custo/Lucro Bruto na DRE. Fica tudo salvo no Dropbox."
 )
+
+pedir_senha_edicao_forecast()
+edicao_liberada = pode_editar_forecast()
+if not edicao_liberada:
+    st.info("👁️ Modo somente visualização — digite a senha de edição acima pra editar e salvar.")
 
 df_real = carregar_realizado_superus()
 df_previsto = carregar_previsto()
@@ -115,13 +120,14 @@ editado = st.data_editor(
     tabela_receita,
     hide_index=True,
     use_container_width=True,
-    num_rows="dynamic",
+    num_rows="dynamic" if edicao_liberada else "fixed",
     column_order=colunas_visiveis,
     # Mês com Realizado já fechado não é editável aqui — não faz sentido
     # "prever" um resultado que já está posto. Só os meses em aberto
     # (meses_fc) ficam liberados pra preenchimento. Ficam ocultos por
-    # padrão (checkbox acima) pra não poluir a tela.
-    disabled=[*rotulos_realizado, f"Total {ano}", "AV%"],
+    # padrão (checkbox acima) pra não poluir a tela. Sem a senha de edição
+    # do Forecast, a tabela toda fica travada (só visualização).
+    disabled=True if not edicao_liberada else [*rotulos_realizado, f"Total {ano}", "AV%"],
     column_config={
         **{col: st.column_config.NumberColumn(col, format="localized", step=1000) for col in rotulos_meses},
         f"Total {ano}": st.column_config.NumberColumn(f"Total {ano}", format="localized"),
@@ -211,12 +217,12 @@ editado_lucro = st.data_editor(
     tabela_lucro,
     hide_index=True,
     use_container_width=True,
-    disabled=["Classificação", "Complexo"],
+    disabled=True if not edicao_liberada else ["Classificação", "Complexo"],
     column_config={col: st.column_config.NumberColumn(col, format="localized", step=1000) for col in rotulos_fc},
     key="editor_lucro_bruto",
 )
 
-if st.button("💾 Salvar Forecast", type="primary"):
+if edicao_liberada and st.button("💾 Salvar Forecast", type="primary"):
     novas_linhas = []
     for _, linha in editado.iterrows():
         classificacao = linha.get("Classificação")
