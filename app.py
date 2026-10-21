@@ -1077,23 +1077,3 @@ _render_complexos_periodo(
     analise_cpx.receita_real_acum, analise_cpx.receita_orc_acum,
     analise_cpx.lucro_real_acum, analise_cpx.lucro_orc_acum,
 )
-
-st.divider()
-
-with st.expander("O que ainda falta para replicar a apresentação de referência"):
-    st.markdown(
-        "- **Despesa Financeira/Imposto de Renda de REV02** — a Despesa Administrativa+Comercial+"
-        "Operação dos meses futuros já vem de arquivo próprio (DESPESA REV02.xlsx, cobre Jul-Dez), "
-        "mas a Despesa Financeira e o Imposto de Renda desses meses futuros ainda são emprestados "
-        "da REV01. A REV03 já tem Despesa Administrativa e Financeira completas e próprias "
-        "(ONEPAGE_REV03.xlsx) — só o Imposto de Renda dos meses futuros dela ainda é emprestado "
-        "da REV01.\n"
-        "- **Histórico 2022-2024** — a DRE Mês/Acumulado já traz Realizado 2025/25x26 "
-        "(RESULTADOS 2025.xlsx), mas os gráficos de Receita Bruta/Ebitda/Lair 2022-2025 da parte "
-        "de baixo da página 6 (Forecast) continuam bloqueados — faltam os 3 anos anteriores.\n"
-        "- **Análise de Complexos na granularidade de Centro de Custo** — cada Centro de Custo de "
-        "Receita conta como uma unidade (não agrupado por cliente/site), a pedido do usuário pra "
-        "maior confiabilidade; o agrupamento comercial \"Complexo\" (coluna já existente na base) "
-        "cobria só ~32 Centros de Custo, com boa parte caindo em \"SEM AGRUPAMENTO\".\n"
-        "- **Breakdown da Despesa Financeira** (Antecipação, Tributos, Fornecedor, Tarifa).\n"
-    )
