@@ -2,3 +2,6 @@ streamlit
 pandas
 plotly
 python-calamine
+psutil
+websocket-client
+requests

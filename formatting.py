@@ -35,4 +35,11 @@ def format_brl_md(valor: float, decimais: int = 0) -> str:
 def format_pct(valor: float, decimais: int = 1) -> str:
     if valor is None or pd.isna(valor):
         return "N/D"
-    return f"{valor * 100:+.{decimais}f}%"
+    return f"{valor * 100:+.{decimais}f}%".replace(".", ",")
+
+
+def format_pct_av(valor: float, base: float, decimais: int = 1) -> str:
+    """Análise Vertical: valor como % de uma base (Receita Bruta)."""
+    if valor is None or pd.isna(valor) or not base:
+        return "-"
+    return f"{(valor / base) * 100:,.{decimais}f}%".replace(".", ",")

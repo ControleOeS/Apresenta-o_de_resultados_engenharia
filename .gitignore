@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 .env
 .streamlit/secrets.toml
+dados_locais/
+# Cópias temporárias de arquivos travados pelo Excel + capturas da
+# apresentação de referência (algumas com números confidenciais de verdade)
+# — nunca deve ir pro git.
+assets_extraidos/
