@@ -286,17 +286,17 @@ def _grafico_kpi(nome: str, campo: str, campo_margem_base: str | None = None) ->
 c1, c2 = st.columns(2)
 fig, _ = _grafico_kpi("Receita Bruta", "receita_bruta")
 c1.plotly_chart(fig, use_container_width=True)
-fig, legenda = _grafico_kpi("Lucro Bruto", "margem_bruta", campo_margem_base="receita_bruta")
+fig, legenda = _grafico_kpi("Lucro Bruto", "margem_bruta", campo_margem_base="receita_liquida")
 c2.plotly_chart(fig, use_container_width=True)
 if legenda:
     c2.caption(legenda)
 
 c3, c4 = st.columns(2)
-fig, legenda = _grafico_kpi("EBITDA", "ebitda", campo_margem_base="receita_bruta")
+fig, legenda = _grafico_kpi("EBITDA", "ebitda", campo_margem_base="receita_liquida")
 c3.plotly_chart(fig, use_container_width=True)
 if legenda:
     c3.caption(legenda)
-fig, legenda = _grafico_kpi("LAIR", "lair", campo_margem_base="receita_bruta")
+fig, legenda = _grafico_kpi("LAIR", "lair", campo_margem_base="receita_liquida")
 c4.plotly_chart(fig, use_container_width=True)
 if legenda:
     c4.caption(legenda)
@@ -313,10 +313,10 @@ st.divider()
 st.markdown("<div class='quebra-pagina'></div>", unsafe_allow_html=True)
 st.header("DRE — Mês e Acumulado")
 
-base_av_mes = dre_mes_real.get("receita_bruta")
-base_av_acum = dre_acum_real.get("receita_bruta")
-base_av_2025_mes = dre_mes_2025.get("receita_bruta") if dre_mes_2025 else None
-base_av_2025_acum = dre_acum_2025.get("receita_bruta") if dre_acum_2025 else None
+base_av_mes = dre_mes_real.get("receita_liquida")
+base_av_acum = dre_acum_real.get("receita_liquida")
+base_av_2025_mes = dre_mes_2025.get("receita_liquida") if dre_mes_2025 else None
+base_av_2025_acum = dre_acum_2025.get("receita_liquida") if dre_acum_2025 else None
 
 TH_VALOR = f"padding:6px 10px; text-align:right; background-color:{VERDE_ESCURO}; color:white; font-weight:700; white-space:nowrap;"
 TH_DERIVADO = f"padding:6px 10px; text-align:right; background-color:{VERDE_DERIVADO_HEADER}; color:white; font-weight:700; white-space:nowrap;"
@@ -454,7 +454,7 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
     )
     if campo in LINHAS_MARGEM:
         celulas_margem_meses = "".join(
-            _td(format_pct_av(dre_por_mes[m][campo], dre_por_mes[m].get("receita_bruta")), classe="col-mes-detalhe")
+            _td(format_pct_av(dre_por_mes[m][campo], dre_por_mes[m].get("receita_liquida")), classe="col-mes-detalhe")
             for m in meses_do_ano
         )
         m_real = format_pct_av(real_acum, base_av_acum)
@@ -574,7 +574,7 @@ else:
             meses_realizado_app, meses_fc_app, receita_por_linha_mes_app, lucro_por_linha_mes_app, nomes_linha_app,
         )
         dre_forecast_total_ano = {campo: sum(dre_forecast_por_mes[m][campo] for m in dre_forecast_por_mes) for _, campo, _ in LINHAS_DRE_DEF}
-        base_av_forecast_ano = dre_forecast_total_ano["receita_bruta"]
+        base_av_forecast_ano = dre_forecast_total_ano["receita_liquida"]
 
         # Meta Otimista (META ANO SUPERUS.xlsx) — só como colunas de
         # referência (Meta + Δ Forecast-Meta) no fim da mesma tabela, não
@@ -610,17 +610,17 @@ else:
             )
             if campo in LINHAS_MARGEM:
                 celulas_pct = "".join(
-                    _td_fc(format_pct_av(dre_forecast_por_mes[m][campo], dre_forecast_por_mes[m]["receita_bruta"]))
+                    _td_fc(format_pct_av(dre_forecast_por_mes[m][campo], dre_forecast_por_mes[m]["receita_liquida"]))
                     for m in dre_forecast_por_mes
                 )
                 celula_pct_total = _td_fc(format_pct_av(dre_forecast_total_ano[campo], base_av_forecast_ano))
                 pct_meta = (
-                    meta_total_ano_app[campo] / meta_total_ano_app["receita_bruta"]
-                    if meta_total_ano_app["receita_bruta"]
+                    meta_total_ano_app[campo] / meta_total_ano_app["receita_liquida"]
+                    if meta_total_ano_app["receita_liquida"]
                     else None
                 )
                 pct_forecast = dre_forecast_total_ano[campo] / base_av_forecast_ano if base_av_forecast_ano else None
-                celula_pct_meta = _td_fc(format_pct_av(meta_total_ano_app[campo], meta_total_ano_app["receita_bruta"]))
+                celula_pct_meta = _td_fc(format_pct_av(meta_total_ano_app[campo], meta_total_ano_app["receita_liquida"]))
                 delta_pp = None if pct_meta is None or pct_forecast is None else pct_forecast - pct_meta
                 celula_pct_delta = _td_fc(format_pct(delta_pp))
                 linhas_forecast_html.append(

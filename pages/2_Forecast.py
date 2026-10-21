@@ -305,7 +305,7 @@ dre_por_mes = fechar_dre_ano(
 )
 
 dre_total_ano = {campo: sum(dre_por_mes[mes][campo] for mes in dre_por_mes) for _, campo, _ in LINHAS_DRE_DEF}
-base_av_ano = dre_total_ano["receita_bruta"]
+base_av_ano = dre_total_ano["receita_liquida"]
 
 # Meta Otimista (META ANO SUPERUS.xlsx) — só como colunas de referência
 # (Meta + Δ Forecast-Meta) no fim da mesma tabela, não entra em nenhum
@@ -347,15 +347,15 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
     )
     if campo in LINHAS_MARGEM:
         celulas_pct = "".join(
-            f"<td style='padding:4px 6px; text-align:right;'>{format_pct_av(dre_por_mes[mes][campo], dre_por_mes[mes]['receita_bruta'])}</td>"
+            f"<td style='padding:4px 6px; text-align:right;'>{format_pct_av(dre_por_mes[mes][campo], dre_por_mes[mes]['receita_liquida'])}</td>"
             for mes in dre_por_mes
         )
         celula_pct_total = f"<td style='padding:4px 6px; text-align:right;'>{format_pct_av(dre_total_ano[campo], base_av_ano)}</td>"
-        pct_meta = meta_total_ano[campo] / meta_total_ano["receita_bruta"] if meta_total_ano["receita_bruta"] else None
+        pct_meta = meta_total_ano[campo] / meta_total_ano["receita_liquida"] if meta_total_ano["receita_liquida"] else None
         pct_forecast = dre_total_ano[campo] / base_av_ano if base_av_ano else None
         celula_pct_meta = (
             f"<td style='padding:4px 6px; text-align:right;'>"
-            f"{format_pct_av(meta_total_ano[campo], meta_total_ano['receita_bruta'])}</td>"
+            f"{format_pct_av(meta_total_ano[campo], meta_total_ano['receita_liquida'])}</td>"
         )
         delta_pp = None if pct_meta is None or pct_forecast is None else pct_forecast - pct_meta
         celula_pct_delta = f"<td style='padding:4px 6px; text-align:right;'>{format_pct(delta_pp)}</td>"
