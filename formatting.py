@@ -39,7 +39,10 @@ def format_pct(valor: float, decimais: int = 1) -> str:
 
 
 def format_pct_av(valor: float, base: float, decimais: int = 1) -> str:
-    """Análise Vertical: valor como % de uma base (Receita Bruta)."""
+    """Análise Vertical: valor como % de uma base (Receita Líquida). Sempre
+    em valor absoluto (sem % negativo) — pedido do usuário, 2026-10-21: uma
+    linha de Despesa/Custo já mostra que é negativa pelo valor em R$ (sinal,
+    cor, parênteses); repetir o sinal no A.V.% é redundante."""
     if valor is None or pd.isna(valor) or not base:
         return "-"
-    return f"{(valor / base) * 100:,.{decimais}f}%".replace(".", ",")
+    return f"{abs(valor / base) * 100:,.{decimais}f}%".replace(".", ",")

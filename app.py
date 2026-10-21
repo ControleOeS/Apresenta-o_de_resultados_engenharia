@@ -334,7 +334,13 @@ def _td_valor(valor, extra="", classe="") -> str:
     return _td(format_brl_md(valor), extra + cor, classe)
 
 
-def _celula_av(valor, base, disponivel=True, extra="") -> str:
+def _celula_av(valor, base, disponivel=True, extra="", mostrar=True) -> str:
+    # Receita Bruta e Impostos não mostram A.V.% — pedido do usuário,
+    # 2026-10-21 (a base do A.V.% virou Receita Líquida, e essas duas linhas
+    # viradas % dela soam estranhas: Receita Bruta > 100%, Imposto sempre
+    # perto de -10%).
+    if not mostrar:
+        return _td("", f"background-color:{VERDE_DERIVADO_TINT};" + extra)
     texto = format_pct_av(valor, base) if disponivel else "N/D"
     return _td(texto, f"background-color:{VERDE_DERIVADO_TINT};" + extra)
 
@@ -372,16 +378,17 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
     orc_mes = dre_mes_orc.get(campo)
     real_2025_mes = dre_mes_2025.get(campo) if dre_mes_2025 else None
     estilo_linha = "font-weight:700; background-color:#EAF2E0;" if destaque else "background-color:#FFFFFF;"
+    mostrar_av = campo not in ("receita_bruta", "imposto")
     linhas_mes_html.append(
         f"<tr style='{estilo_linha}'>"
         f"<td style='padding:6px 12px; white-space:nowrap;'>{nome}</td>"
         + _td_valor(real_mes)
-        + _celula_av(real_mes, base_av_mes)
+        + _celula_av(real_mes, base_av_mes, mostrar=mostrar_av)
         + _td_valor(orc_mes)
-        + _celula_av(orc_mes, base_av_mes, disponivel=orc_mes is not None)
+        + _celula_av(orc_mes, base_av_mes, disponivel=orc_mes is not None, mostrar=mostrar_av)
         + _celulas_delta(real_mes, orc_mes, destaque)
         + _td_valor(real_2025_mes)
-        + _celula_av(real_2025_mes, base_av_2025_mes, disponivel=real_2025_mes is not None)
+        + _celula_av(real_2025_mes, base_av_2025_mes, disponivel=real_2025_mes is not None, mostrar=mostrar_av)
         + _celulas_delta(real_mes, real_2025_mes, destaque)
         + "</tr>"
     )
@@ -436,6 +443,7 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
     orc_acum = dre_acum_orc.get(campo)
     real_2025_acum = dre_acum_2025.get(campo) if dre_acum_2025 else None
     estilo_linha = "font-weight:700; background-color:#EAF2E0;" if destaque else "background-color:#FFFFFF;"
+    mostrar_av = campo not in ("receita_bruta", "imposto")
     celulas_meses = "".join(_td_valor(dre_por_mes[m][campo], classe="col-mes-detalhe") for m in meses_do_ano)
     linhas_acum_html.append(
         f"<tr style='{estilo_linha}'>"
@@ -443,12 +451,12 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
         + celulas_meses
         + _espacador_td()
         + _td_valor(real_acum)
-        + _celula_av(real_acum, base_av_acum)
+        + _celula_av(real_acum, base_av_acum, mostrar=mostrar_av)
         + _td_valor(orc_acum)
-        + _celula_av(orc_acum, base_av_acum, disponivel=orc_acum is not None)
+        + _celula_av(orc_acum, base_av_acum, disponivel=orc_acum is not None, mostrar=mostrar_av)
         + _celulas_delta(real_acum, orc_acum, destaque)
         + _td_valor(real_2025_acum)
-        + _celula_av(real_2025_acum, base_av_2025_acum, disponivel=real_2025_acum is not None)
+        + _celula_av(real_2025_acum, base_av_2025_acum, disponivel=real_2025_acum is not None, mostrar=mostrar_av)
         + _celulas_delta(real_acum, real_2025_acum, destaque)
         + "</tr>"
     )
