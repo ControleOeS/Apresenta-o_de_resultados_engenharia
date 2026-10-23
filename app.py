@@ -709,14 +709,26 @@ receita_real_acum_cat = receita_por_categoria_realizado(df_real, mes_ini_ano, me
 receita_orc_mes_cat = receita_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ref, mes_ref)
 receita_orc_acum_cat = receita_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 
-def _config_colunas_moeda(*nomes) -> dict:
+def _config_colunas_com_textuais(colunas_numericas: list[str], colunas_textuais: set[str]) -> dict:
     # format="localized" usa o idioma do NAVEGADOR de quem acessa (não do
     # servidor) pra decidir separador de milhar/decimal — pra um usuário com
     # o navegador em pt-BR já sai com ponto de milhar, igual ao resto do
     # app. Crucial: mantém o valor como número de verdade, então clicar no
     # cabeçalho pra ordenar ordena pelo VALOR, não pelo texto formatado
     # (era isso que causava "969.336" vir antes de "84.184").
-    return {nome: st.column_config.NumberColumn(nome, format="localized") for nome in nomes}
+    #
+    # Colunas em `colunas_textuais` viram TextColumn em vez de NumberColumn
+    # — pedido do usuário, 2026-10-23: uma coluna 100% N/D (nenhuma fonte de
+    # Orçado pra essa Revisão/granularidade) como NumberColumn("localized")
+    # renderizava "None" na tela em vez de ficar em branco (bug visual do
+    # componente), então colunas assim viram texto puro ("N/D").
+    config = {}
+    for nome in colunas_numericas:
+        if nome in colunas_textuais:
+            config[nome] = st.column_config.TextColumn(nome)
+        else:
+            config[nome] = st.column_config.NumberColumn(nome, format="localized")
+    return config
 
 
 def _tabela_discreta_categoria(serie_real_mes, serie_orc_mes, serie_real_acum, serie_orc_acum) -> pd.DataFrame:
@@ -729,7 +741,7 @@ def _tabela_discreta_categoria(serie_real_mes, serie_orc_mes, serie_real_acum, s
     )
 
     def _v(serie, cat):
-        return float("nan") if serie is None else float(serie.get(cat, 0.0))
+        return "N/D" if serie is None else float(serie.get(cat, 0.0))
 
     linhas = [
         {
@@ -766,7 +778,7 @@ def _tabela_cc_da_categoria(categoria, detalhe_real_mes, detalhe_orc_mes, detalh
 
     def _v(serie, cc, disponivel):
         if not disponivel:
-            return float("nan")
+            return "N/D"
         return float(serie.get(cc, 0.0))
 
     tem_orc_mes = detalhe_orc_mes is not None
@@ -788,15 +800,21 @@ def _render_categoria_com_drilldown(
     serie_real_mes, serie_orc_mes, serie_real_acum, serie_orc_acum,
     detalhe_real_mes, detalhe_orc_mes, detalhe_real_acum, detalhe_orc_acum,
 ):
-    colunas_moeda = _config_colunas_moeda(
+    nomes_colunas = [
         f"Orçado {nome_mes}/{ano}", f"Realizado {nome_mes}/{ano}",
         f"Orçado Acum. {ano}", f"Realizado Acum. {ano}",
-    )
+    ]
+    colunas_textuais_cat = {
+        nome for nome, disponivel in [
+            (f"Orçado {nome_mes}/{ano}", serie_orc_mes is not None),
+            (f"Orçado Acum. {ano}", serie_orc_acum is not None),
+        ] if not disponivel
+    }
     st.dataframe(
         _tabela_discreta_categoria(serie_real_mes, serie_orc_mes, serie_real_acum, serie_orc_acum),
         hide_index=True,
         use_container_width=True,
-        column_config=colunas_moeda,
+        column_config=_config_colunas_com_textuais(nomes_colunas, colunas_textuais_cat),
     )
     categorias = sorted(
         set(serie_real_mes.index)
@@ -806,13 +824,25 @@ def _render_categoria_com_drilldown(
         key=lambda c: -(serie_real_acum.get(c, 0) or 0),
     )
     st.caption("Abra uma categoria abaixo pra ver os Centros de Custo que a compõem:")
+    if detalhe_orc_mes is None or detalhe_orc_acum is None:
+        st.caption(
+            "⚠️ Essa Revisão não tem Orçado detalhado por Centro de Custo (só no agregado da "
+            "categoria, na tabela acima) — por isso aparece \"N/D\" no detalhamento abaixo."
+        )
+    colunas_textuais_cc = {
+        nome for nome, disponivel in [
+            (f"Orçado {nome_mes}/{ano}", detalhe_orc_mes is not None),
+            (f"Orçado Acum. {ano}", detalhe_orc_acum is not None),
+        ] if not disponivel
+    }
+    colunas_moeda_cc = _config_colunas_com_textuais(nomes_colunas, colunas_textuais_cc)
     for cat in categorias:
         with st.expander(f"🔎 {cat}"):
             st.dataframe(
                 _tabela_cc_da_categoria(cat, detalhe_real_mes, detalhe_orc_mes, detalhe_real_acum, detalhe_orc_acum),
                 hide_index=True,
                 use_container_width=True,
-                column_config=colunas_moeda,
+                column_config=colunas_moeda_cc,
             )
 
 
