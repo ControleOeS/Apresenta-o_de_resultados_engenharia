@@ -392,17 +392,11 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
         + _celulas_delta(real_mes, real_2025_mes, destaque)
         + "</tr>"
     )
-    if campo in LINHAS_MARGEM:
-        m_real = format_pct_av(real_mes, base_av_mes)
-        m_orc = format_pct_av(orc_mes, base_av_mes) if orc_mes is not None else "N/D"
-        m_2025 = format_pct_av(real_2025_mes, base_av_2025_mes) if real_2025_mes is not None else "N/D"
-        linhas_mes_html.append(
-            "<tr style='font-style:italic; color:#555; background-color:#F7F9F4;'>"
-            f"<td style='padding:4px 12px 4px 24px;'>{LINHAS_MARGEM[campo]}</td>"
-            + _td(m_real) + _td("") + _td(m_orc) + _td("") + _td("") + _td("")
-            + _td(m_2025) + _td("") + _td("") + _td("")
-            + "</tr>"
-        )
+    # Sem linha extra de "Margem X %" aqui (diferente da tabela Acumulado) —
+    # pedido do usuário, 2026-10-23: desde que o A.V.% passou a ter Receita
+    # Líquida como base, a Margem Bruta/EBITDA/LAIR já é exatamente o A.V.%
+    # mostrado na própria linha (Lucro Bruto/EBITDA/LAIR) acima — essa linha
+    # italic só repetia o mesmo número.
 
 tabela_mes_html = (
     # Sem width:100% de propósito — essa tabela tem bem menos colunas que a
