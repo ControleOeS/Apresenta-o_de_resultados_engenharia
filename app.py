@@ -762,10 +762,14 @@ def _tabela_cc_da_categoria(categoria, detalhe_real_mes, detalhe_orc_mes, detalh
     def _filtra(df):
         # Agrupa por nome (soma) — dois Códigos de Centro de Custo distintos
         # às vezes compartilham o mesmo nome descritivo, o que quebraria uma
-        # busca direta por nome (índice duplicado).
+        # busca direta por nome (índice duplicado). .strip() porque a fonte
+        # do Realizado tem bastante nome duplicado só por causa de espaço
+        # sobrando no fim (ex: "FILIAL PARA" e "FILIAL PARA ") — confirmado
+        # em 2026-10-23 ao tentar comparar isso com o Orçado REV02 por nome.
         if df is None or df.empty:
             return pd.Series(dtype=float)
-        sub = df.loc[df["Categoria"] == categoria]
+        sub = df.loc[df["Categoria"] == categoria].copy()
+        sub["Centro de Custo"] = sub["Centro de Custo"].astype(str).str.strip()
         return sub.groupby("Centro de Custo")["Valor"].sum()
 
     f_real_mes, f_orc_mes = _filtra(detalhe_real_mes), _filtra(detalhe_orc_mes)

@@ -19,6 +19,7 @@ from dados import (
     custo_por_cc_refinado,
     despesa_por_categoria_rev02_mensal,
     despesa_por_categoria_rev03_mensal,
+    despesa_por_cc_rev02_mensal,
     imposto_por_cc_refinado,
     mes_corte_revisao,
     receita_por_cc_refinado,
@@ -276,7 +277,25 @@ def receita_por_cc_previsto(
     return _detalhar_serie(serie, tabela_dimensao) if not serie.empty else None
 
 
+def _despesa_por_cc_rev02(mes_ini, mes_fim) -> pd.DataFrame | None:
+    df = despesa_por_cc_rev02_mensal()
+    sub = df[(df["Mes"] >= mes_ini) & (df["Mes"] <= mes_fim)]
+    if sub.empty:
+        return None
+    agrupado = sub.groupby(["Categoria", "Centro de Custo"], as_index=False)["Valor"].sum()
+    agrupado["Codigo"] = agrupado["Centro de Custo"]
+    return agrupado[["Categoria", "Codigo", "Centro de Custo", "Valor"]]
+
+
 def despesa_por_cc_previsto(df_previsto: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.DataFrame | None:
+    # REV02 (DESPESA REV02.xlsx) tem granularidade de departamento (nomes
+    # convertidos pro equivalente do Realizado em despesa_por_cc_rev02_mensal,
+    # ver dados.py) — não é a mesma fonte/esquema de código do df_previsto
+    # "antigo" (só cobre REV00/REV01). REV03 continua sem detalhamento por
+    # CC (ONEPAGE_REV03 tem granularidade de departamento mas sem
+    # equivalente conferido ainda com o Realizado).
+    if revisao == "REV02":
+        return _despesa_por_cc_rev02(mes_ini, mes_fim)
     return _por_cc_previsto(df_previsto, CODIGOS_DESPESA_ADM, revisao, cenario, mes_ini, mes_fim)
 
 

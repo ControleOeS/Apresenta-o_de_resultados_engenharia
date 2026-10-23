@@ -502,6 +502,79 @@ LINHAS_COMERCIAL_REV02 = {"COMERCIAL"}
 LINHAS_ADMINISTRATIVO_REV02 = {"DESPESA - O&S"}
 
 
+# Nome "CENTRO DE CUSTO" do DESPESA REV02.xlsx -> nome equivalente mais
+# próximo no Realizado, pra dar pra comparar Orçado x Realizado por Centro
+# de Custo no detalhamento (aproximação confirmada com o usuário,
+# 2026-10-23: "Planejamento Técnico" equivale a "Planejamento", "SSMA"
+# equivale a "Segurança", etc. — os dois lados não usam o mesmo nome/
+# granularidade de departamento). Nomes já idênticos nos dois lados
+# (SUPRIMENTOS, COMERCIAL, ENGENHARIA) não precisam entrar aqui. "GESTORES
+# TRAINEES" não tem equivalente nenhum no Realizado — fica de fora,
+# aparece como linha só do Orçado (sem Realizado pra comparar).
+MAPA_NOME_DESPESA_REV02_REALIZADO: dict[str, str] = {
+    "DOP": "DIRETORIA DE OPERAÇÃO",
+    "DOP - PLR": "PLR DOP",
+    "PLANEJAMENTO - MDO": "PLANEJAMENTO TÉCNICO",
+    "PLANEJAMENTO - INSUMOS": "PLANEJAMENTO TÉCNICO",
+    "PLANEJAMENTO - PLR PJ": "PLR PLANEJAMENTO",
+    "SSMA - INSUMOS": "SEGURANÇA",
+    "SSMA - MDO": "SEGURANÇA",
+    "SSMA - PLR PJ": "PLR SSMA",
+    "FILIAL PARÁ": "FILIAL PARA",
+    "FILIAL PARÁ - PLR PJ": "FILIAL PARA",
+    "COMERCIAL - PLR": "PLR COMERCIAL",
+    "DESPESA - O&S": "O&S GESTORA DE RECURSOS E PARTICIPACOES S/A",
+}
+
+# Linhas de subtotal da aba DESPESA (não são Centro de Custo nenhum —
+# excluídas do detalhamento por CC pra não contar em dobro).
+_LINHAS_SUBTOTAL_DESPESA_REV02 = {"TOTAL - OPERAÇÃO", "TOTAL - OPERAÇÃO C COMERCIAL", "DESPESA TOTAL"}
+
+
+@st.cache_data(show_spinner="Lendo Despesa REV02 do Dropbox...")
+def _ler_despesa_rev02_bruta(_token: str, cache_key: str) -> pd.DataFrame:
+    content = download(_token, DROPBOX_DESPESA_REV02)
+    return pd.read_excel(BytesIO(content), sheet_name="DESPESA", engine="calamine")
+
+
+def _categoria_rev02(nome: str) -> str:
+    if nome in LINHAS_PLR_REV02:
+        return CATEGORIA_DESPESA_PLR
+    if nome in LINHAS_COMERCIAL_REV02:
+        return CATEGORIA_DESPESA_COMERCIAL
+    if nome in LINHAS_ADMINISTRATIVO_REV02:
+        return CATEGORIA_DESPESA_ADMINISTRATIVO
+    return CATEGORIA_DESPESA_OPERACAO
+
+
+def despesa_por_cc_rev02_mensal() -> pd.DataFrame:
+    """Uma linha por Centro de Custo/Mês (Jul-Dez/26) do Orçado REV02 —
+    nome já convertido pro equivalente do Realizado (MAPA_NOME_DESPESA_REV02_REALIZADO)
+    quando existe, senão mantém o nome original. Usado só pro detalhamento
+    por CC (drilldown) — o agregado por categoria continua vindo de
+    despesa_por_categoria_rev02_mensal, sem mudança."""
+    token, rev = token_e_rev(DROPBOX_DESPESA_REV02)
+    df = _ler_despesa_rev02_bruta(token, rev)
+    df = df[~df["CENTRO DE CUSTO"].isin(_LINHAS_SUBTOTAL_DESPESA_REV02)]
+    linhas = []
+    for _, linha in df.iterrows():
+        nome_orcado = linha["CENTRO DE CUSTO"]
+        nome_cc = MAPA_NOME_DESPESA_REV02_REALIZADO.get(nome_orcado, nome_orcado)
+        categoria = _categoria_rev02(nome_orcado)
+        for nome_mes, numero in MESES_NOME_REV02.items():
+            if nome_mes not in df.columns:
+                continue
+            linhas.append(
+                {
+                    "Mes": pd.Timestamp(year=2026, month=numero, day=1),
+                    "Centro de Custo": nome_cc,
+                    "Categoria": categoria,
+                    "Valor": linha[nome_mes],
+                }
+            )
+    return pd.DataFrame(linhas)
+
+
 @st.cache_data(show_spinner="Lendo Despesa REV02 do Dropbox...")
 def _ler_despesa_por_categoria_rev02_mensal(_token: str, cache_key: str) -> pd.DataFrame:
     content = download(_token, DROPBOX_DESPESA_REV02)
