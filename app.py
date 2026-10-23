@@ -312,8 +312,14 @@ st.divider()
 st.markdown("<div class='quebra-pagina'></div>", unsafe_allow_html=True)
 st.header("DRE — Mês e Acumulado")
 
+# Cada coluna usa a Receita Líquida DELA MESMA como base do A.V.% — nunca a
+# de outra coluna (pedido do usuário, 2026-10-23: antes o Orçado usava a
+# Receita Líquida do Realizado como base, e por isso a própria linha
+# Receita Líquida do Orçado aparecia tipo "107,3%" em vez de 100,0%).
 base_av_mes = dre_mes_real.get("receita_liquida")
+base_av_orc_mes = dre_mes_orc.get("receita_liquida")
 base_av_acum = dre_acum_real.get("receita_liquida")
+base_av_orc_acum = dre_acum_orc.get("receita_liquida")
 base_av_2025_mes = dre_mes_2025.get("receita_liquida") if dre_mes_2025 else None
 base_av_2025_acum = dre_acum_2025.get("receita_liquida") if dre_acum_2025 else None
 
@@ -327,24 +333,25 @@ TH_GRUPO_DERIVADO = f"text-align:center; padding:6px; background-color:{VERDE_DE
 TH_ROTULO = f"text-align:left; padding:6px 10px; background-color:{VERDE_ESCURO}; color:white;"
 
 
-def _td(conteudo, extra="", classe="") -> str:
-    return f"<td class='{classe}' style='padding:6px 6px; text-align:right; white-space:nowrap; {extra}'>{conteudo}</td>"
+def _td(conteudo, extra="", classe="", rowspan=None) -> str:
+    atributo_rowspan = f" rowspan='{rowspan}'" if rowspan else ""
+    return f"<td class='{classe}'{atributo_rowspan} style='padding:6px 6px; text-align:right; white-space:nowrap; {extra}'>{conteudo}</td>"
 
 
-def _td_valor(valor, extra="", classe="") -> str:
+def _td_valor(valor, extra="", classe="", rowspan=None) -> str:
     cor = f"color:{VERMELHO};" if (valor or 0) < 0 else ""
-    return _td(format_brl_md(valor), extra + cor, classe)
+    return _td(format_brl_md(valor), extra + cor, classe, rowspan=rowspan)
 
 
-def _celula_av(valor, base, disponivel=True, extra="", mostrar=True) -> str:
+def _celula_av(valor, base, disponivel=True, extra="", mostrar=True, rowspan=None) -> str:
     # Receita Bruta e Impostos não mostram A.V.% — pedido do usuário,
     # 2026-10-21 (a base do A.V.% virou Receita Líquida, e essas duas linhas
     # viradas % dela soam estranhas: Receita Bruta > 100%, Imposto sempre
     # perto de -10%).
     if not mostrar:
-        return _td("", f"background-color:{VERDE_DERIVADO_TINT};" + extra)
+        return _td("", f"background-color:{VERDE_DERIVADO_TINT};" + extra, rowspan=rowspan)
     texto = format_pct_av(valor, base) if disponivel else "N/D"
-    return _td(texto, f"background-color:{VERDE_DERIVADO_TINT};" + extra)
+    return _td(texto, f"background-color:{VERDE_DERIVADO_TINT};" + extra, rowspan=rowspan)
 
 
 def _espacador_th() -> str:
@@ -359,7 +366,7 @@ def _espacador_td() -> str:
     return "<td style='padding:0; width:10px; background-color:#FFFFFF; border:none;'></td>"
 
 
-def _celulas_delta(real, orc, destaque: bool) -> str:
+def _celulas_delta(real, orc, destaque: bool, rowspan=None) -> str:
     delta = (real - orc) if orc is not None else None
     ah = _variacao_pct(real, orc)
     if destaque:
@@ -370,7 +377,7 @@ def _celulas_delta(real, orc, destaque: bool) -> str:
         estilo = f"color:{cor}; background-color:{VERDE_DERIVADO_TINT};"
     texto_delta = format_brl_md(delta) if delta is not None else "N/D"
     texto_ah = format_pct(ah) if ah is not None else "N/D"
-    return _td(texto_delta, estilo) + _td(texto_ah, estilo)
+    return _td(texto_delta, estilo, rowspan=rowspan) + _td(texto_ah, estilo, rowspan=rowspan)
 
 
 # --- Tabela do Mês ---------------------------------------------------
@@ -387,7 +394,7 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
         + _td_valor(real_mes)
         + _celula_av(real_mes, base_av_mes, mostrar=mostrar_av)
         + _td_valor(orc_mes)
-        + _celula_av(orc_mes, base_av_mes, disponivel=orc_mes is not None, mostrar=mostrar_av)
+        + _celula_av(orc_mes, base_av_orc_mes, disponivel=orc_mes is not None, mostrar=mostrar_av)
         + _celulas_delta(real_mes, orc_mes, destaque)
         + _td_valor(real_2025_mes)
         + _celula_av(real_2025_mes, base_av_2025_mes, disponivel=real_2025_mes is not None, mostrar=mostrar_av)
@@ -440,26 +447,42 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
     real_2025_acum = dre_acum_2025.get(campo) if dre_acum_2025 else None
     estilo_linha = "font-weight:700; background-color:#EAF2E0;" if destaque else "background-color:#FFFFFF;"
     mostrar_av = campo not in ("receita_bruta", "imposto")
+    eh_margem = campo in LINHAS_MARGEM
+    # Linhas de Margem (Lucro Bruto/EBITDA/LAIR) ganham uma 2ª linha logo
+    # abaixo só com a Margem % mês a mês (não repetida em nenhum outro
+    # lugar) — pedido do usuário, 2026-10-23. Do bloco Acumulado em diante
+    # (mesmo número que já está nesta linha principal), as células ficam
+    # mescladas (rowspan=2) com a linha de baixo em vez de repetir o
+    # mesmo A.V.% duas vezes.
+    rs = 2 if eh_margem else None
     celulas_meses = "".join(_td_valor(dre_por_mes[m][campo], classe="col-mes-detalhe") for m in meses_do_ano)
     linhas_acum_html.append(
         f"<tr style='{estilo_linha}'>"
         f"<td style='padding:6px 12px; white-space:nowrap;'>{nome}</td>"
         + celulas_meses
         + _espacador_td()
-        + _td_valor(real_acum)
-        + _celula_av(real_acum, base_av_acum, mostrar=mostrar_av)
-        + _td_valor(orc_acum)
-        + _celula_av(orc_acum, base_av_acum, disponivel=orc_acum is not None, mostrar=mostrar_av)
-        + _celulas_delta(real_acum, orc_acum, destaque)
-        + _td_valor(real_2025_acum)
-        + _celula_av(real_2025_acum, base_av_2025_acum, disponivel=real_2025_acum is not None, mostrar=mostrar_av)
-        + _celulas_delta(real_acum, real_2025_acum, destaque)
+        + _td_valor(real_acum, rowspan=rs)
+        + _celula_av(real_acum, base_av_acum, mostrar=mostrar_av, rowspan=rs)
+        + _td_valor(orc_acum, rowspan=rs)
+        + _celula_av(orc_acum, base_av_orc_acum, disponivel=orc_acum is not None, mostrar=mostrar_av, rowspan=rs)
+        + _celulas_delta(real_acum, orc_acum, destaque, rowspan=rs)
+        + _td_valor(real_2025_acum, rowspan=rs)
+        + _celula_av(real_2025_acum, base_av_2025_acum, disponivel=real_2025_acum is not None, mostrar=mostrar_av, rowspan=rs)
+        + _celulas_delta(real_acum, real_2025_acum, destaque, rowspan=rs)
         + "</tr>"
     )
-    # Sem linha extra de "Margem X %" aqui (mesmo ajuste feito na tabela do
-    # Mês, 2026-10-23) — o A.V.% já mostrado na própria linha de Lucro
-    # Bruto/EBITDA/LAIR acima é exatamente a Margem Bruta/EBITDA/LAIR %,
-    # desde que o A.V.% passou a ter Receita Líquida como base.
+    if eh_margem:
+        celulas_margem_meses = "".join(
+            _td(format_pct_av(dre_por_mes[m][campo], dre_por_mes[m].get("receita_liquida")), classe="col-mes-detalhe")
+            for m in meses_do_ano
+        )
+        linhas_acum_html.append(
+            "<tr style='font-style:italic; color:#555; background-color:#F7F9F4;'>"
+            f"<td style='padding:4px 12px 4px 24px;'>{LINHAS_MARGEM[campo]}</td>"
+            + celulas_margem_meses
+            + _espacador_td()
+            + "</tr>"
+        )
 
 cabecalho_meses = "".join(
     f"<th class='col-mes-detalhe' style='{TH_VALOR}'>{MESES_PT[m.month]}/{str(m.year)[2:]}</th>" for m in meses_do_ano
