@@ -256,8 +256,7 @@ def _grafico_kpi(nome: str, campo: str, campo_margem_base: str | None = None) ->
             showgrid=False,
         ),
         yaxis=dict(
-            title=dict(text="Valor (R$)", font=dict(size=12, color="#444")),
-            tickprefix="R$ ",
+            title=dict(text="Valor", font=dict(size=12, color="#444")),
             tickformat=",.2s",
             tickfont=dict(size=11, color="#444"),
             gridcolor="#E8E8E4",
@@ -284,19 +283,19 @@ def _grafico_kpi(nome: str, campo: str, campo_margem_base: str | None = None) ->
 
 
 c1, c2 = st.columns(2)
-fig, _ = _grafico_kpi("Receita Bruta", "receita_bruta")
+fig, _ = _grafico_kpi("Receita Bruta (em R$)", "receita_bruta")
 c1.plotly_chart(fig, use_container_width=True)
-fig, legenda = _grafico_kpi("Lucro Bruto", "margem_bruta", campo_margem_base="receita_liquida")
+fig, legenda = _grafico_kpi("Lucro Bruto (em R$)", "margem_bruta", campo_margem_base="receita_liquida")
 c2.plotly_chart(fig, use_container_width=True)
 if legenda:
     c2.caption(legenda)
 
 c3, c4 = st.columns(2)
-fig, legenda = _grafico_kpi("EBITDA", "ebitda", campo_margem_base="receita_liquida")
+fig, legenda = _grafico_kpi("EBITDA (em R$)", "ebitda", campo_margem_base="receita_liquida")
 c3.plotly_chart(fig, use_container_width=True)
 if legenda:
     c3.caption(legenda)
-fig, legenda = _grafico_kpi("LAIR", "lair", campo_margem_base="receita_liquida")
+fig, legenda = _grafico_kpi("LAIR (em R$)", "lair", campo_margem_base="receita_liquida")
 c4.plotly_chart(fig, use_container_width=True)
 if legenda:
     c4.caption(legenda)
@@ -318,15 +317,18 @@ base_av_acum = dre_acum_real.get("receita_liquida")
 base_av_2025_mes = dre_mes_2025.get("receita_liquida") if dre_mes_2025 else None
 base_av_2025_acum = dre_acum_2025.get("receita_liquida") if dre_acum_2025 else None
 
-TH_VALOR = f"padding:6px 10px; text-align:right; background-color:{VERDE_ESCURO}; color:white; font-weight:700; white-space:nowrap;"
-TH_DERIVADO = f"padding:6px 10px; text-align:right; background-color:{VERDE_DERIVADO_HEADER}; color:white; font-weight:700; white-space:nowrap;"
+# Padding mais enxuto do que antes (era 6px 10px) — pedido do usuário,
+# 2026-10-23: sem o prefixo "R$" em cada célula, o conteúdo ficou bem mais
+# curto, então as colunas podem ficar mais estreitas também.
+TH_VALOR = f"padding:6px 6px; text-align:right; background-color:{VERDE_ESCURO}; color:white; font-weight:700; white-space:nowrap;"
+TH_DERIVADO = f"padding:6px 6px; text-align:right; background-color:{VERDE_DERIVADO_HEADER}; color:white; font-weight:700; white-space:nowrap;"
 TH_GRUPO_VALOR = f"text-align:center; padding:6px; background-color:{VERDE_ESCURO}; color:white; font-weight:700;"
 TH_GRUPO_DERIVADO = f"text-align:center; padding:6px; background-color:{VERDE_DERIVADO_HEADER}; color:white; font-weight:700;"
-TH_ROTULO = f"text-align:left; padding:6px 12px; background-color:{VERDE_ESCURO}; color:white;"
+TH_ROTULO = f"text-align:left; padding:6px 10px; background-color:{VERDE_ESCURO}; color:white;"
 
 
 def _td(conteudo, extra="", classe="") -> str:
-    return f"<td class='{classe}' style='padding:6px 10px; text-align:right; white-space:nowrap; {extra}'>{conteudo}</td>"
+    return f"<td class='{classe}' style='padding:6px 6px; text-align:right; white-space:nowrap; {extra}'>{conteudo}</td>"
 
 
 def _td_valor(valor, extra="", classe="") -> str:
@@ -423,7 +425,7 @@ tabela_mes_html = (
 )
 
 st.markdown(
-    f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'{nome_mes}/{ano}', tabela_mes_html)}</div>",
+    f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'{nome_mes}/{ano} (em R$)', tabela_mes_html)}</div>",
     unsafe_allow_html=True,
 )
 
@@ -488,7 +490,7 @@ tabela_acum_html = (
 )
 
 st.markdown(
-    f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'ACUMULADO/{ano}', tabela_acum_html)}</div>",
+    f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'ACUMULADO/{ano} (em R$)', tabela_acum_html)}</div>",
     unsafe_allow_html=True,
 )
 
@@ -629,7 +631,7 @@ else:
             + "</table>"
         )
         st.markdown(
-            f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'FORECAST {ano}', tabela_forecast_html, largura_total=True)}</div>",
+            f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'FORECAST {ano} (em R$)', tabela_forecast_html, largura_total=True)}</div>",
             unsafe_allow_html=True,
         )
         st.caption(
@@ -768,7 +770,7 @@ def _render_categoria_com_drilldown(
             )
 
 
-st.subheader("Receita Bruta por Categoria")
+st.subheader("Receita Bruta por Categoria (em R$)")
 col_rec_mes, col_rec_acum = st.columns(2)
 col_rec_mes.plotly_chart(
     grafico_categoria_empilhado(
@@ -845,7 +847,7 @@ lucro_real_acum_cat = receita_real_acum_cat.add(imposto_real_acum_cat, fill_valu
 lucro_orc_mes_cat = _soma_serie_opcional(_soma_serie_opcional(receita_orc_mes_cat, imposto_orc_mes_cat), custo_orc_mes_cat)
 lucro_orc_acum_cat = _soma_serie_opcional(_soma_serie_opcional(receita_orc_acum_cat, imposto_orc_acum_cat), custo_orc_acum_cat)
 
-st.subheader("Lucro Bruto por Categoria")
+st.subheader("Lucro Bruto por Categoria (em R$)")
 col_lb_mes, col_lb_acum = st.columns(2)
 col_lb_mes.plotly_chart(
     grafico_categoria_empilhado(
@@ -922,7 +924,7 @@ if despesa_orc_mes_cat is not None:
 if despesa_orc_acum_cat is not None:
     despesa_orc_acum_cat = -despesa_orc_acum_cat
 
-st.subheader("Despesa Administrativa por Categoria")
+st.subheader("Despesa Administrativa por Categoria (em R$)")
 col_desp_mes, col_desp_acum = st.columns(2)
 col_desp_mes.plotly_chart(
     grafico_categoria_empilhado(

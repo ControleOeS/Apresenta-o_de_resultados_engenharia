@@ -81,7 +81,7 @@ forecast_salvo = carregar_forecast()
 # Receita Bruta Mensal — mesmas linhas da página 7 de referência (semente
 # só na primeira abertura; depois disso é sempre o que foi salvo).
 # ------------------------------------------------------------------
-st.header("Receita Bruta Mensal")
+st.header("Receita Bruta Mensal (em R$)")
 st.caption("*Forecast* = mês ainda sem Realizado fechado.")
 
 linhas_salvas = forecast_salvo.get("linhas_receita")
@@ -152,7 +152,7 @@ TH_ROTULO = f"text-align:left; padding:6px 12px; background-color:{VERDE_ESCURO}
 
 def _linha_resumo_html(rotulo: str, valores: list[float]) -> str:
     celulas = "".join(
-        f"<td style='padding:4px 8px; text-align:right; white-space:nowrap; font-size:0.78rem;'>{format_brl_md(v) if v else '-'}</td>"
+        f"<td style='padding:4px 8px; text-align:right; white-space:nowrap; font-size:0.78rem;'>{format_brl_md(v)}</td>"
         for v in valores
     )
     total_linha = sum(valores)
@@ -182,7 +182,7 @@ st.divider()
 # linhas, espelhadas ao vivo do editor acima), só pros meses em aberto.
 # Custo é calculado automaticamente (Imposto de 10%, 0% pra Indenização).
 # ------------------------------------------------------------------
-st.header("Lucro Bruto")
+st.header("Lucro Bruto (em R$)")
 st.caption(
     "Mesmas linhas da Receita Bruta Mensal acima — preencha o Lucro Bruto (R$) de cada uma nos "
     "meses em aberto; o Custo de cada linha é calculado automaticamente (Receita Líquida - Lucro "
@@ -375,7 +375,7 @@ tabela_dre_html = (
 )
 
 st.markdown(
-    render_tabela_com_faixa(f"Jan-{MESES_PT[meses_fc[-1].month]}/{ano}", tabela_dre_html, largura_total=True),
+    render_tabela_com_faixa(f"Jan-{MESES_PT[meses_fc[-1].month]}/{ano} (em R$)", tabela_dre_html, largura_total=True),
     unsafe_allow_html=True,
 )
 
