@@ -409,6 +409,17 @@ def _ler_tabela_dimensao(_token: str, cache_key: str) -> pd.DataFrame:
     sub.columns = ["Codigo", "Centro de Custo"]
     sub = sub.dropna(subset=["Codigo"])
     sub["Codigo"] = sub["Codigo"].astype(str)
+    # "FUNIL DE VENDAS" é um código-bucket (placeholder de pipeline, usado
+    # por dezenas de Complexos diferentes em "Dados Refinado" — não um
+    # Centro de Custo de verdade) — nessa aba ele aparece casado com um
+    # nome de projeto qualquer ("HYDRO ALUNORTE ACESSO E ISOLAMENTO PA",
+    # conferido em 2026-10-23), provavelmente só coincidência de posição na
+    # planilha de origem. Emprestar esse nome inflava um projeto específico
+    # com a receita de TODO o funil (ficava bilhões em vez de milhões) e
+    # ainda caía em "Não classificado". Removendo aqui, a busca de nome cai
+    # no fallback (mostra "FUNIL DE VENDAS" mesmo) em vez de herdar um nome
+    # errado.
+    sub = sub[sub["Codigo"] != "FUNIL DE VENDAS"]
     return sub.drop_duplicates(subset="Codigo", keep="first").reset_index(drop=True)
 
 
