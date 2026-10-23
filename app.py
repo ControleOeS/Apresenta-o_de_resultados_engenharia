@@ -15,6 +15,7 @@ from dados import (
     carregar_meta_mensal,
     carregar_refinado_detalhado,
     dre_2025_periodo,
+    MESES_SUBSTITUIR_POR_REV,
     revisao_vigente_no_mes,
     tabela_dimensao_centro_de_custo,
 )
@@ -122,6 +123,28 @@ with st.sidebar:
         indice_revisao_padrao = revisoes.index(revisao_param)
     revisao_sel = st.selectbox("Revisão", revisoes, index=indice_revisao_padrao)
     cenario_sel = "Otimista"
+
+    with st.expander("ℹ️ Qual Revisão escolher?"):
+        st.caption(
+            "Cada Revisão só prevê de verdade a partir de um certo mês — antes "
+            "disso, ela só espelha o Realizado (sem Δ, não é um Orçado de "
+            "verdade pra esse período)."
+        )
+        _ano_filtro = mes_ref.year
+        _revisoes_ordenadas = sorted(MESES_SUBSTITUIR_POR_REV.items(), key=lambda kv: kv[1])
+        _linhas_periodo = []
+        for _i, (_rev, _meses_sub) in enumerate(_revisoes_ordenadas):
+            _mes_ini = _meses_sub + 1
+            _mes_fim = _revisoes_ordenadas[_i + 1][1] if _i + 1 < len(_revisoes_ordenadas) else 12
+            if _mes_ini > _mes_fim or _rev not in revisoes:
+                continue
+            _periodo = (
+                f"{MESES_PT[_mes_ini]}/{str(_ano_filtro)[2:]}"
+                if _mes_ini == _mes_fim
+                else f"{MESES_PT[_mes_ini]}-{MESES_PT[_mes_fim]}/{str(_ano_filtro)[2:]}"
+            )
+            _linhas_periodo.append({"Revisão": _rev, "Prevê de verdade": _periodo})
+        st.dataframe(pd.DataFrame(_linhas_periodo), hide_index=True, use_container_width=True)
 
     st.query_params["mes"] = mes_ref.strftime("%Y-%m-%d")
     st.query_params["revisao"] = revisao_sel
