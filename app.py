@@ -454,23 +454,10 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
         + _celulas_delta(real_acum, real_2025_acum, destaque)
         + "</tr>"
     )
-    if campo in LINHAS_MARGEM:
-        celulas_margem_meses = "".join(
-            _td(format_pct_av(dre_por_mes[m][campo], dre_por_mes[m].get("receita_liquida")), classe="col-mes-detalhe")
-            for m in meses_do_ano
-        )
-        m_real = format_pct_av(real_acum, base_av_acum)
-        m_orc = format_pct_av(orc_acum, base_av_acum) if orc_acum is not None else "N/D"
-        m_2025 = format_pct_av(real_2025_acum, base_av_2025_acum) if real_2025_acum is not None else "N/D"
-        linhas_acum_html.append(
-            "<tr style='font-style:italic; color:#555; background-color:#F7F9F4;'>"
-            f"<td style='padding:4px 12px 4px 24px;'>{LINHAS_MARGEM[campo]}</td>"
-            + celulas_margem_meses
-            + _espacador_td()
-            + _td(m_real) + _td("") + _td(m_orc) + _td("") + _td("") + _td("")
-            + _td(m_2025) + _td("") + _td("") + _td("")
-            + "</tr>"
-        )
+    # Sem linha extra de "Margem X %" aqui (mesmo ajuste feito na tabela do
+    # Mês, 2026-10-23) — o A.V.% já mostrado na própria linha de Lucro
+    # Bruto/EBITDA/LAIR acima é exatamente a Margem Bruta/EBITDA/LAIR %,
+    # desde que o A.V.% passou a ter Receita Líquida como base.
 
 cabecalho_meses = "".join(
     f"<th class='col-mes-detalhe' style='{TH_VALOR}'>{MESES_PT[m.month]}/{str(m.year)[2:]}</th>" for m in meses_do_ano
