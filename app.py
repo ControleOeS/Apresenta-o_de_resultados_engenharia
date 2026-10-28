@@ -579,14 +579,16 @@ st.divider()
 # ------------------------------------------------------------------
 # Curva S — Orçado x Realizado Acumulado (ano inteiro, independe do Mês de
 # referência filtrado na barra lateral) — mesma visão já existente no
-# DASH_DIRETORIA, adaptada aqui (só um Cenário disponível nesta
-# apresentação — Otimista — então uma curva de Orçado só, não duas).
+# DASH_DIRETORIA, com as duas curvas de Orçado (Moderado/Otimista) — o
+# resto da apresentação usa só o Cenário Otimista (cenario_sel fixo), mas
+# a Curva S mostra os dois igual ao DASH_DIRETORIA.
 # ------------------------------------------------------------------
 st.header("Curva S — Orçado x Realizado Acumulado")
 st.caption(
     "Acumulado mês a mês ao longo do ano inteiro (independe do Mês de referência "
-    "filtrado na barra lateral) — Realizado comparado ao Orçado efetivo da Revisão "
-    "selecionada, para a linha do DRE escolhida abaixo."
+    "filtrado na barra lateral) — Realizado comparado ao Orçado efetivo de cada "
+    "Cenário (Moderado e Otimista) na Revisão selecionada, para a linha do DRE "
+    "escolhida abaixo."
 )
 
 linha_curva_s_sel = st.selectbox(
@@ -596,13 +598,21 @@ linha_curva_s_sel = st.selectbox(
 )
 campo_curva_s = next(campo for nome, campo, _ in LINHAS_DRE_DEF if nome == linha_curva_s_sel)
 
+COR_ORCADO_MODERADO = "#00465C"  # ponta esquerda do GRADIENTE_BANNER — distingue do verde do Otimista
+
 
 def _grafico_curva_s(
-    df_real_mensal: pd.DataFrame, df_orc_mensal: pd.DataFrame, campo: str, nome_linha: str, ano_cs: int
-) -> tuple[go.Figure, str | None]:
+    df_real_mensal: pd.DataFrame,
+    df_orc_mensal_moderado: pd.DataFrame,
+    df_orc_mensal_otimista: pd.DataFrame,
+    campo: str,
+    nome_linha: str,
+    ano_cs: int,
+) -> tuple[go.Figure, list[str]]:
     meses_ano_cs = list(pd.date_range(f"{ano_cs}-01-01", f"{ano_cs}-12-01", freq="MS"))
     fig = go.Figure()
     hover = "%{x|%b/%Y}<br>%{fullData.name}: R$ %{y:,.2f}<extra></extra>"
+    avisos: list[str] = []
 
     if not df_real_mensal.empty and campo in df_real_mensal.columns:
         serie_real = df_real_mensal.set_index("Mes")[campo].reindex(meses_ano_cs)
@@ -619,25 +629,28 @@ def _grafico_curva_s(
                 )
             )
 
-    aviso = None
-    if df_orc_mensal.empty or campo not in df_orc_mensal.columns or df_orc_mensal[campo].isna().all():
-        aviso = f"Orçado: sem base de Previsto disponível para \"{nome_linha}\" nesta Revisão."
-    else:
+    for df_orc_mensal, nome_serie, cor, tracejado in [
+        (df_orc_mensal_moderado, "Orçado Moderado", COR_ORCADO_MODERADO, "dot"),
+        (df_orc_mensal_otimista, "Orçado Otimista", VERDE_ORCADO, "dash"),
+    ]:
+        if df_orc_mensal.empty or campo not in df_orc_mensal.columns or df_orc_mensal[campo].isna().all():
+            avisos.append(f"{nome_serie}: sem base de Previsto disponível para \"{nome_linha}\" nesta Revisão.")
+            continue
         serie_orc = df_orc_mensal.set_index("Mes")[campo].reindex(meses_ano_cs)
         if serie_orc.isna().any():
-            aviso = f"Orçado: N/D para \"{nome_linha}\" em pelo menos um mês do ano — curva não exibida."
-        else:
-            acumulado_orc = serie_orc.cumsum()
-            fig.add_trace(
-                go.Scatter(
-                    x=acumulado_orc.index,
-                    y=acumulado_orc.values,
-                    mode="lines",
-                    name="Orçado",
-                    line=dict(color=VERDE_ORCADO, width=3, dash="dash"),
-                    hovertemplate=hover,
-                )
+            avisos.append(f"{nome_serie}: N/D para \"{nome_linha}\" em pelo menos um mês do ano — curva não exibida.")
+            continue
+        acumulado_orc = serie_orc.cumsum()
+        fig.add_trace(
+            go.Scatter(
+                x=acumulado_orc.index,
+                y=acumulado_orc.values,
+                mode="lines",
+                name=nome_serie,
+                line=dict(color=cor, width=2, dash=tracejado),
+                hovertemplate=hover,
             )
+        )
 
     fig.update_layout(
         separators=",.",
@@ -651,16 +664,19 @@ def _grafico_curva_s(
     )
     fig.update_xaxes(tickformat="%b/%Y", showgrid=False)
     fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor="#CCCCCC")
-    return fig, aviso
+    return fig, avisos
 
 
 df_real_mensal_cs = calcular_dre_por_mes(df_real[df_real["Mes"].dt.year == ano])
-df_orc_mensal_cs = previsto_mensal_ano(df_previsto, df_refinado, df_real, revisao_sel, cenario_sel, ano)
+df_orc_mensal_moderado_cs = previsto_mensal_ano(df_previsto, df_refinado, df_real, revisao_sel, "Moderado", ano)
+df_orc_mensal_otimista_cs = previsto_mensal_ano(df_previsto, df_refinado, df_real, revisao_sel, "Otimista", ano)
 
-fig_curva_s, aviso_curva_s = _grafico_curva_s(df_real_mensal_cs, df_orc_mensal_cs, campo_curva_s, linha_curva_s_sel, ano)
+fig_curva_s, avisos_curva_s = _grafico_curva_s(
+    df_real_mensal_cs, df_orc_mensal_moderado_cs, df_orc_mensal_otimista_cs, campo_curva_s, linha_curva_s_sel, ano
+)
 st.plotly_chart(fig_curva_s, use_container_width=True)
-if aviso_curva_s:
-    st.caption(f"⚠️ {aviso_curva_s}")
+for aviso in avisos_curva_s:
+    st.caption(f"⚠️ {aviso}")
 
 st.divider()
 
