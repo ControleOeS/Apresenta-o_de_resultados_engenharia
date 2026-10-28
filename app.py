@@ -786,10 +786,10 @@ def _tabela_cc_da_categoria(categoria, detalhe_real_mes, detalhe_orc_mes, detalh
     f_real_mes, f_orc_mes = _filtra(detalhe_real_mes), _filtra(detalhe_orc_mes)
     f_real_acum, f_orc_acum = _filtra(detalhe_real_acum), _filtra(detalhe_orc_acum)
 
-    # Nome de exibição: prioriza o Realizado (nome "oficial"/mais atual);
-    # cai pro nome do Orçado só quando o Código existe apenas lá.
+    # Nome de exibição: prioriza o Orçado (pedido do usuário, 2026-10-28) —
+    # cai pro nome do Realizado só quando o Código não existe no Orçado.
     nomes = {}
-    for d in (detalhe_orc_mes, detalhe_orc_acum, detalhe_real_mes, detalhe_real_acum):
+    for d in (detalhe_real_mes, detalhe_real_acum, detalhe_orc_mes, detalhe_orc_acum):
         nomes.update(_nomes(d))
 
     ccs = sorted(
@@ -806,6 +806,7 @@ def _tabela_cc_da_categoria(categoria, detalhe_real_mes, detalhe_orc_mes, detalh
     tem_orc_acum = detalhe_orc_acum is not None
     linhas = [
         {
+            "Código": cc,
             "Centro de Custo": nomes.get(cc, cc),
             f"Orçado {nome_mes}/{ano}": _v(f_orc_mes, cc, tem_orc_mes),
             f"Realizado {nome_mes}/{ano}": _v(f_real_mes, cc, True),
