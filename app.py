@@ -919,10 +919,18 @@ def _tabela_cc_da_categoria(categoria, detalhe_real_mes, detalhe_orc_mes, detalh
         return sub.groupby("Codigo")["Valor"].sum()
 
     def _nomes(df):
+        # Alguns lançamentos do Realizado vêm sem "Centro de Custo" preenchido
+        # (vira "(sem nome)" lá em _detalhar) mesmo quando o mesmo Código tem
+        # nome real em outros lançamentos — sem essa priorização, o
+        # drop_duplicates abaixo podia pegar justo a variante "(sem nome)"
+        # pro Código (ordenação alfabética: "(" vem antes de letra). Regra:
+        # só usa "(sem nome)" quando o Código não tem NENHUM nome real.
         if df is None or df.empty:
             return {}
         sub = df.loc[df["Categoria"] == categoria].copy()
         sub["Codigo"] = sub["Codigo"].astype(str).str.strip()
+        sub["_tem_nome"] = sub["Centro de Custo"] != "(sem nome)"
+        sub = sub.sort_values("_tem_nome", ascending=False)
         return sub.drop_duplicates("Codigo").set_index("Codigo")["Centro de Custo"].to_dict()
 
     f_real_mes, f_orc_mes = _filtra(detalhe_real_mes), _filtra(detalhe_orc_mes)
