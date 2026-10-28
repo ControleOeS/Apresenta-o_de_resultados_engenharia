@@ -591,14 +591,28 @@ st.caption(
     "escolhida abaixo."
 )
 
+col_curva_s_linha, col_curva_s_base = st.columns([2, 1])
 _opcoes_curva_s = [nome for nome, _, _ in LINHAS_DRE_DEF]
-linha_curva_s_sel = st.selectbox(
+linha_curva_s_sel = col_curva_s_linha.selectbox(
     "Linha do DRE",
     _opcoes_curva_s,
     index=_opcoes_curva_s.index("(=) Lucro Bruto"),
     key="curva_s_linha",
 )
 campo_curva_s = next(campo for nome, campo, _ in LINHAS_DRE_DEF if nome == linha_curva_s_sel)
+
+base_curva_s_sel = col_curva_s_base.radio(
+    "Linha de referência",
+    ["Realizado", "Forecast"],
+    key="curva_s_base",
+    horizontal=True,
+)
+if base_curva_s_sel == "Forecast":
+    col_curva_s_base.caption(
+        "Realizado fechado + Forecast preenchido na página \"Forecast\" (último estado salvo) pro resto do ano."
+    )
+else:
+    col_curva_s_base.caption(f"Só o Realizado, até {MESES_PT[mes_ref.month]}/{mes_ref.year} (Mês de referência).")
 
 COR_ORCADO_MODERADO = "#00465C"  # ponta esquerda do GRADIENTE_BANNER — distingue do verde do Otimista
 
@@ -610,6 +624,7 @@ def _grafico_curva_s(
     campo: str,
     nome_linha: str,
     ano_cs: int,
+    nome_real: str = "Realizado",
 ) -> tuple[go.Figure, list[str]]:
     meses_ano_cs = list(pd.date_range(f"{ano_cs}-01-01", f"{ano_cs}-12-01", freq="MS"))
     fig = go.Figure()
@@ -625,7 +640,7 @@ def _grafico_curva_s(
                     x=acumulado_real.index,
                     y=acumulado_real.values,
                     mode="lines",
-                    name="Realizado",
+                    name=nome_real,
                     line=dict(color=VERDE_ESCURO, width=4),
                     hovertemplate=hover,
                 )
@@ -669,12 +684,31 @@ def _grafico_curva_s(
     return fig, avisos
 
 
-df_real_mensal_cs = calcular_dre_por_mes(df_real[df_real["Mes"].dt.year == ano])
+if base_curva_s_sel == "Forecast":
+    meses_fc_cs = meses_forecast(df_real, ano)
+    if not meses_fc_cs:
+        # Ano já fechado inteiro no Realizado — nada de Forecast pra misturar.
+        df_real_mensal_cs = calcular_dre_por_mes(df_real[df_real["Mes"].dt.year == ano])
+    else:
+        revisao_atual_forecast_cs = revisao_atual_forecast(df_real, revisoes, ano)
+        meses_realizado_cs = sorted(m for m in df_real["Mes"].dropna().unique() if pd.Timestamp(m).year == ano)
+        receita_por_linha_mes_cs, lucro_por_linha_mes_cs, nomes_linha_cs = dados_forecast_salvo(meses_fc_cs)
+        dre_por_mes_cs = fechar_dre_ano(
+            df_real, df_previsto, df_refinado, revisao_atual_forecast_cs,
+            meses_realizado_cs, meses_fc_cs, receita_por_linha_mes_cs, lucro_por_linha_mes_cs, nomes_linha_cs,
+        )
+        df_real_mensal_cs = pd.DataFrame([dict(dre, Mes=mes) for mes, dre in dre_por_mes_cs.items()])
+    nome_real_cs = "Realizado + Forecast"
+else:
+    df_real_mensal_cs = calcular_dre_por_mes(df_real[(df_real["Mes"].dt.year == ano) & (df_real["Mes"] <= mes_ref)])
+    nome_real_cs = "Realizado"
+
 df_orc_mensal_moderado_cs = previsto_mensal_ano(df_previsto, df_refinado, df_real, revisao_sel, "Moderado", ano)
 df_orc_mensal_otimista_cs = previsto_mensal_ano(df_previsto, df_refinado, df_real, revisao_sel, "Otimista", ano)
 
 fig_curva_s, avisos_curva_s = _grafico_curva_s(
-    df_real_mensal_cs, df_orc_mensal_moderado_cs, df_orc_mensal_otimista_cs, campo_curva_s, linha_curva_s_sel, ano
+    df_real_mensal_cs, df_orc_mensal_moderado_cs, df_orc_mensal_otimista_cs, campo_curva_s, linha_curva_s_sel, ano,
+    nome_real=nome_real_cs,
 )
 st.plotly_chart(fig_curva_s, use_container_width=True)
 for aviso in avisos_curva_s:

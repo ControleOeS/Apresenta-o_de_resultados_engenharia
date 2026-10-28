@@ -835,6 +835,38 @@ def _despesa_mensal_com_fonte_nova(
     }
 
 
+def _receita_custo_mensal_com_mes_corte(
+    df_real: pd.DataFrame, df_refinado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim
+) -> dict | None:
+    """Receita Bruta/Imposto/Receita Líquida/Custo/Margem Bruta, mês a mês:
+    antes do corte de previsão da Revisão (mes_corte_revisao) espelha o
+    próprio Realizado — mesma regra já usada pra Despesa em
+    _despesa_mensal_com_fonte_nova, estendida aqui pra essas linhas
+    (2026-10-28: sem isso, Receita/Custo/Margem Bruta da REV02/REV03 nunca
+    batiam com o Realizado mesmo em meses que a Revisão não previa de
+    verdade ainda — vinham sempre do plano original gravado no Refinado
+    Engenharias, nunca espelhados — inflando a divergência até o Lucro
+    Líquido mesmo dentro da janela "sem Δ" documentada pro usuário)."""
+    mes_corte = mes_corte_revisao(revisao, pd.Timestamp(mes_fim).year)
+    campos = ["receita_bruta", "imposto", "receita_liquida", "custo", "margem_bruta"]
+    total = dict.fromkeys(campos, 0.0)
+    algum_mes_com_dado = False
+    for mes in pd.date_range(mes_ini, mes_fim, freq="MS"):
+        if mes < mes_corte:
+            dre_mes = calcular_dre(df_real[df_real["Mes"] == mes])
+            for campo in campos:
+                total[campo] += dre_mes[campo]
+            algum_mes_com_dado = True
+        else:
+            base_mes = calcular_previsto_refinado(df_refinado, revisao, cenario, mes, mes)
+            if base_mes is None:
+                continue
+            for campo in campos:
+                total[campo] += base_mes[campo]
+            algum_mes_com_dado = True
+    return total if algum_mes_com_dado else None
+
+
 def calcular_previsto_com_fallback_despesa(
     df_previsto: pd.DataFrame,
     df_refinado: pd.DataFrame,
@@ -851,7 +883,8 @@ def calcular_previsto_com_fallback_despesa(
     combinada mês a mês com o Realizado pros meses já fechados — ver
     _despesa_mensal_com_fonte_nova. Despesa Financeira/Imposto de Renda
     seguem emprestados da REV01 pros dois (nenhuma das duas tem fonte
-    própria pra isso ainda).
+    própria pra isso ainda). Receita Bruta/Custo/Margem Bruta usam o mesmo
+    espelhamento antes do corte (ver _receita_custo_mensal_com_mes_corte).
     """
     if revisao in ("REV00", "REV01"):
         sub = df_previsto[
@@ -859,7 +892,10 @@ def calcular_previsto_com_fallback_despesa(
         ]
         return calcular_previsto(sub, cenario), False
 
-    base = calcular_previsto_refinado(df_refinado, revisao, cenario, mes_ini, mes_fim)
+    if df_real is not None:
+        base = _receita_custo_mensal_com_mes_corte(df_real, df_refinado, revisao, cenario, mes_ini, mes_fim)
+    else:
+        base = calcular_previsto_refinado(df_refinado, revisao, cenario, mes_ini, mes_fim)
     if base is None:
         return None, False
 
