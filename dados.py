@@ -901,6 +901,28 @@ def calcular_previsto_com_fallback_despesa(
     return resultado, provisorio
 
 
+def previsto_mensal_ano(
+    df_previsto: pd.DataFrame,
+    df_refinado: pd.DataFrame,
+    df_real: pd.DataFrame,
+    revisao: str,
+    cenario: str,
+    ano: int,
+) -> pd.DataFrame:
+    """Orçado "efetivo" (mesma regra de calcular_previsto_com_fallback_despesa,
+    aplicada mês a mês) para o ano inteiro — usado pela Curva S. Um campo que
+    não tenha base nenhuma pra um mês específico (Revisão/recorte sem
+    cascata completa) vira None nesse mês, nunca 0 — pra não gerar uma curva
+    acumulada enganosa como se o Orçado fosse zero."""
+    linhas = []
+    for mes in pd.date_range(f"{ano}-01-01", f"{ano}-12-01", freq="MS"):
+        totais, _ = calcular_previsto_com_fallback_despesa(df_previsto, df_refinado, revisao, cenario, mes, mes, df_real)
+        linha = {campo: (totais or {}).get(campo) for campo in CAMPOS_DRE}
+        linha["Mes"] = mes
+        linhas.append(linha)
+    return pd.DataFrame(linhas)
+
+
 # Meta Ano Superus (META ANO SUPERUS.xlsx) — DRE anual alvo, valores em R$
 # mil, uma aba por cenário. Linha->campo reconciliado com LINHAS_DRE_DEF:
 # "Despesas Fixas" = despesa_adm; "Depreciação/Amortização" +

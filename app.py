@@ -7,6 +7,7 @@ from dados import (
     LINHAS_MARGEM,
     MESES_PT,
     calcular_dre,
+    calcular_dre_por_mes,
     calcular_previsto_com_fallback_despesa,
     carregar_previsto,
     carregar_previsto_refinado,
@@ -16,6 +17,7 @@ from dados import (
     carregar_refinado_detalhado,
     dre_2025_periodo,
     MESES_SUBSTITUIR_POR_REV,
+    previsto_mensal_ano,
     revisao_vigente_no_mes,
     tabela_dimensao_centro_de_custo,
 )
@@ -571,6 +573,94 @@ elif dre_mes_orc.get("despesa_adm") is None:
         "como N/D para essa Revisão/Cenário — ainda não temos uma base de Previsto completa até Lucro "
         "Líquido para ela (hoje só REV00 e REV01-Otimista têm essa cascata)."
     )
+
+st.divider()
+
+# ------------------------------------------------------------------
+# Curva S — Orçado x Realizado Acumulado (ano inteiro, independe do Mês de
+# referência filtrado na barra lateral) — mesma visão já existente no
+# DASH_DIRETORIA, adaptada aqui (só um Cenário disponível nesta
+# apresentação — Otimista — então uma curva de Orçado só, não duas).
+# ------------------------------------------------------------------
+st.header("Curva S — Orçado x Realizado Acumulado")
+st.caption(
+    "Acumulado mês a mês ao longo do ano inteiro (independe do Mês de referência "
+    "filtrado na barra lateral) — Realizado comparado ao Orçado efetivo da Revisão "
+    "selecionada, para a linha do DRE escolhida abaixo."
+)
+
+linha_curva_s_sel = st.selectbox(
+    "Linha do DRE",
+    [nome for nome, _, _ in LINHAS_DRE_DEF],
+    key="curva_s_linha",
+)
+campo_curva_s = next(campo for nome, campo, _ in LINHAS_DRE_DEF if nome == linha_curva_s_sel)
+
+
+def _grafico_curva_s(
+    df_real_mensal: pd.DataFrame, df_orc_mensal: pd.DataFrame, campo: str, nome_linha: str, ano_cs: int
+) -> tuple[go.Figure, str | None]:
+    meses_ano_cs = list(pd.date_range(f"{ano_cs}-01-01", f"{ano_cs}-12-01", freq="MS"))
+    fig = go.Figure()
+    hover = "%{x|%b/%Y}<br>%{fullData.name}: R$ %{y:,.2f}<extra></extra>"
+
+    if not df_real_mensal.empty and campo in df_real_mensal.columns:
+        serie_real = df_real_mensal.set_index("Mes")[campo].reindex(meses_ano_cs)
+        acumulado_real = serie_real.cumsum().dropna()
+        if not acumulado_real.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=acumulado_real.index,
+                    y=acumulado_real.values,
+                    mode="lines",
+                    name="Realizado",
+                    line=dict(color=VERDE_ESCURO, width=4),
+                    hovertemplate=hover,
+                )
+            )
+
+    aviso = None
+    if df_orc_mensal.empty or campo not in df_orc_mensal.columns or df_orc_mensal[campo].isna().all():
+        aviso = f"Orçado: sem base de Previsto disponível para \"{nome_linha}\" nesta Revisão."
+    else:
+        serie_orc = df_orc_mensal.set_index("Mes")[campo].reindex(meses_ano_cs)
+        if serie_orc.isna().any():
+            aviso = f"Orçado: N/D para \"{nome_linha}\" em pelo menos um mês do ano — curva não exibida."
+        else:
+            acumulado_orc = serie_orc.cumsum()
+            fig.add_trace(
+                go.Scatter(
+                    x=acumulado_orc.index,
+                    y=acumulado_orc.values,
+                    mode="lines",
+                    name="Orçado",
+                    line=dict(color=VERDE_ORCADO, width=3, dash="dash"),
+                    hovertemplate=hover,
+                )
+            )
+
+    fig.update_layout(
+        separators=",.",
+        yaxis_tickformat=",.2s",
+        plot_bgcolor="#FFFFFF",
+        paper_bgcolor="#FFFFFF",
+        height=420,
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        margin=dict(t=30, b=10, l=70, r=10),
+    )
+    fig.update_xaxes(tickformat="%b/%Y", showgrid=False)
+    fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor="#CCCCCC")
+    return fig, aviso
+
+
+df_real_mensal_cs = calcular_dre_por_mes(df_real[df_real["Mes"].dt.year == ano])
+df_orc_mensal_cs = previsto_mensal_ano(df_previsto, df_refinado, df_real, revisao_sel, cenario_sel, ano)
+
+fig_curva_s, aviso_curva_s = _grafico_curva_s(df_real_mensal_cs, df_orc_mensal_cs, campo_curva_s, linha_curva_s_sel, ano)
+st.plotly_chart(fig_curva_s, use_container_width=True)
+if aviso_curva_s:
+    st.caption(f"⚠️ {aviso_curva_s}")
 
 st.divider()
 
