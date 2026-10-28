@@ -757,23 +757,40 @@ def _tabela_discreta_categoria(serie_real_mes, serie_orc_mes, serie_real_acum, s
 
 
 def _tabela_cc_da_categoria(categoria, detalhe_real_mes, detalhe_orc_mes, detalhe_real_acum, detalhe_orc_acum) -> pd.DataFrame:
-    """Uma linha por Centro de Custo dentro da categoria, com os 4 valores."""
+    """Uma linha por Centro de Custo (por Código) dentro da categoria, com os 4 valores.
+
+    Concilia Orçado x Realizado pelo CÓDIGO do Centro de Custo, não mais
+    pelo nome — Orçado e Realizado às vezes grafam o mesmo Centro de Custo
+    de um jeito ligeiramente diferente (abreviação, acento, maiúscula), o
+    que fazia a busca por nome cair em duas linhas separadas em vez de
+    conciliar na mesma linha. O Código já vem confiável dos dois lados em
+    todo detalhamento (_detalhar/_detalhar_serie em analise_categoria.py);
+    pra Despesa REV02 especificamente, o Código é resolvido a partir do
+    de-para de nomes já existente (ver _despesa_por_cc_rev02 em
+    analise_categoria.py — o de-para em si não foi alterado)."""
 
     def _filtra(df):
-        # Agrupa por nome (soma) — dois Códigos de Centro de Custo distintos
-        # às vezes compartilham o mesmo nome descritivo, o que quebraria uma
-        # busca direta por nome (índice duplicado). .strip() porque a fonte
-        # do Realizado tem bastante nome duplicado só por causa de espaço
-        # sobrando no fim (ex: "FILIAL PARA" e "FILIAL PARA ") — confirmado
-        # em 2026-10-23 ao tentar comparar isso com o Orçado REV02 por nome.
         if df is None or df.empty:
             return pd.Series(dtype=float)
         sub = df.loc[df["Categoria"] == categoria].copy()
-        sub["Centro de Custo"] = sub["Centro de Custo"].astype(str).str.strip()
-        return sub.groupby("Centro de Custo")["Valor"].sum()
+        sub["Codigo"] = sub["Codigo"].astype(str).str.strip()
+        return sub.groupby("Codigo")["Valor"].sum()
+
+    def _nomes(df):
+        if df is None or df.empty:
+            return {}
+        sub = df.loc[df["Categoria"] == categoria].copy()
+        sub["Codigo"] = sub["Codigo"].astype(str).str.strip()
+        return sub.drop_duplicates("Codigo").set_index("Codigo")["Centro de Custo"].to_dict()
 
     f_real_mes, f_orc_mes = _filtra(detalhe_real_mes), _filtra(detalhe_orc_mes)
     f_real_acum, f_orc_acum = _filtra(detalhe_real_acum), _filtra(detalhe_orc_acum)
+
+    # Nome de exibição: prioriza o Realizado (nome "oficial"/mais atual);
+    # cai pro nome do Orçado só quando o Código existe apenas lá.
+    nomes = {}
+    for d in (detalhe_orc_mes, detalhe_orc_acum, detalhe_real_mes, detalhe_real_acum):
+        nomes.update(_nomes(d))
 
     ccs = sorted(
         set(f_real_mes.index) | set(f_orc_mes.index) | set(f_real_acum.index) | set(f_orc_acum.index),
@@ -789,7 +806,7 @@ def _tabela_cc_da_categoria(categoria, detalhe_real_mes, detalhe_orc_mes, detalh
     tem_orc_acum = detalhe_orc_acum is not None
     linhas = [
         {
-            "Centro de Custo": cc,
+            "Centro de Custo": nomes.get(cc, cc),
             f"Orçado {nome_mes}/{ano}": _v(f_orc_mes, cc, tem_orc_mes),
             f"Realizado {nome_mes}/{ano}": _v(f_real_mes, cc, True),
             f"Orçado Acum. {ano}": _v(f_orc_acum, cc, tem_orc_acum),
@@ -1049,8 +1066,8 @@ col_desp_acum.markdown(
 )
 despesa_detalhe_real_mes = despesa_por_cc_realizado(df_real, mes_ref, mes_ref).assign(Valor=lambda d: -d["Valor"])
 despesa_detalhe_real_acum = despesa_por_cc_realizado(df_real, mes_ini_ano, mes_ref).assign(Valor=lambda d: -d["Valor"])
-despesa_detalhe_orc_mes = despesa_por_cc_previsto(df_previsto, revisao_sel, cenario_sel, mes_ref, mes_ref)
-despesa_detalhe_orc_acum = despesa_por_cc_previsto(df_previsto, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
+despesa_detalhe_orc_mes = despesa_por_cc_previsto(df_previsto, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
+despesa_detalhe_orc_acum = despesa_por_cc_previsto(df_previsto, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 if despesa_detalhe_orc_mes is not None:
     despesa_detalhe_orc_mes = despesa_detalhe_orc_mes.assign(Valor=lambda d: -d["Valor"])
 if despesa_detalhe_orc_acum is not None:

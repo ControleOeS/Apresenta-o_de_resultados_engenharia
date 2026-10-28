@@ -277,17 +277,40 @@ def receita_por_cc_previsto(
     return _detalhar_serie(serie, tabela_dimensao) if not serie.empty else None
 
 
-def _despesa_por_cc_rev02(mes_ini, mes_fim) -> pd.DataFrame | None:
+def _mapa_nome_para_codigo_despesa(df_real: pd.DataFrame) -> dict[str, str]:
+    """Nome (Centro de Custo, normalizado) -> Código real, construído a
+    partir de TODO o Realizado de Despesa (sem filtro de período, pra não
+    perder nome de Centro de Custo que não teve lançamento no período
+    escolhido). Usado só pra resolver o Código do Orçado REV02 (que só tem
+    nome de departamento — ver MAPA_NOME_DESPESA_REV02_REALIZADO em
+    dados.py), nunca os valores em si."""
+    sub = df_real[df_real["Nível 1"].isin(NIVEL_DESPESA_ADM)].copy()
+    sub["Centro de Custo"] = sub["Centro de Custo"].astype(str).str.strip()
+    sub["Cod. Centro de Custo"] = sub["Cod. Centro de Custo"].astype(str)
+    return sub.drop_duplicates("Centro de Custo").set_index("Centro de Custo")["Cod. Centro de Custo"].to_dict()
+
+
+def _despesa_por_cc_rev02(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.DataFrame | None:
     df = despesa_por_cc_rev02_mensal()
     sub = df[(df["Mes"] >= mes_ini) & (df["Mes"] <= mes_fim)]
     if sub.empty:
         return None
     agrupado = sub.groupby(["Categoria", "Centro de Custo"], as_index=False)["Valor"].sum()
-    agrupado["Codigo"] = agrupado["Centro de Custo"]
+    # Resolve pro Código real do Realizado (via o nome já convertido pelo
+    # de-para de dados.py) — sem isso o drilldown comparava Orçado e
+    # Realizado por nome e os dois caíam em linhas separadas sempre que a
+    # grafia não batia 100% (ver _tabela_cc_da_categoria em app.py, que
+    # agora concilia por Código). Nome sem equivalente no Realizado (ex:
+    # "GESTORES TRAINEES") mantém o próprio nome como pseudo-código — continua
+    # aparecendo como linha só do Orçado, igual antes.
+    mapa_codigo = _mapa_nome_para_codigo_despesa(df_real)
+    agrupado["Codigo"] = agrupado["Centro de Custo"].map(mapa_codigo).fillna(agrupado["Centro de Custo"])
     return agrupado[["Categoria", "Codigo", "Centro de Custo", "Valor"]]
 
 
-def despesa_por_cc_previsto(df_previsto: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.DataFrame | None:
+def despesa_por_cc_previsto(
+    df_previsto: pd.DataFrame, df_real: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim
+) -> pd.DataFrame | None:
     # REV02 (DESPESA REV02.xlsx) tem granularidade de departamento (nomes
     # convertidos pro equivalente do Realizado em despesa_por_cc_rev02_mensal,
     # ver dados.py) — não é a mesma fonte/esquema de código do df_previsto
@@ -295,7 +318,7 @@ def despesa_por_cc_previsto(df_previsto: pd.DataFrame, revisao: str, cenario: st
     # CC (ONEPAGE_REV03 tem granularidade de departamento mas sem
     # equivalente conferido ainda com o Realizado).
     if revisao == "REV02":
-        return _despesa_por_cc_rev02(mes_ini, mes_fim)
+        return _despesa_por_cc_rev02(df_real, mes_ini, mes_fim)
     return _por_cc_previsto(df_previsto, CODIGOS_DESPESA_ADM, revisao, cenario, mes_ini, mes_fim)
 
 
