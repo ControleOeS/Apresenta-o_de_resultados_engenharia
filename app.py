@@ -591,9 +591,11 @@ st.caption(
     "escolhida abaixo."
 )
 
+_opcoes_curva_s = [nome for nome, _, _ in LINHAS_DRE_DEF]
 linha_curva_s_sel = st.selectbox(
     "Linha do DRE",
-    [nome for nome, _, _ in LINHAS_DRE_DEF],
+    _opcoes_curva_s,
+    index=_opcoes_curva_s.index("(=) Lucro Bruto"),
     key="curva_s_linha",
 )
 campo_curva_s = next(campo for nome, campo, _ in LINHAS_DRE_DEF if nome == linha_curva_s_sel)
