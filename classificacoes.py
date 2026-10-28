@@ -7,6 +7,7 @@ entre Realizado e Previsto) — o nome descritivo só é guardado junto para
 exibição/busca."""
 
 from config import DROPBOX_CATEGORIAS, DROPBOX_CLASSIFICACOES
+from dados import normalizar_codigo_cc
 from dropbox_io import baixar_json, salvar_json
 
 
@@ -67,8 +68,13 @@ CLASSIFICACOES_FIXAS: dict[str, dict[str, str]] = {
 
 
 def carregar_classificacoes() -> dict[str, dict[str, str]]:
-    """Retorna {codigo_cc: {"nome": ..., "categoria": ...}}."""
-    mapa = dict(baixar_json(DROPBOX_CLASSIFICACOES, {}))
+    """Retorna {codigo_cc: {"nome": ..., "categoria": ...}}.
+
+    Normaliza a chave (SIN0N/REG0N -> SIN01/REG01, ver normalizar_codigo_cc
+    em dados.py) ao carregar — migra sozinho qualquer classificação salva
+    antes dessa normalização existir, sob o código antigo não-canônico."""
+    bruto = baixar_json(DROPBOX_CLASSIFICACOES, {})
+    mapa = {normalizar_codigo_cc(codigo): info for codigo, info in bruto.items()}
     mapa.update(CLASSIFICACOES_FIXAS)
     return mapa
 

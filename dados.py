@@ -1,3 +1,4 @@
+import re
 from io import BytesIO
 
 import pandas as pd
@@ -16,6 +17,23 @@ from config import (
     DROPBOX_RESULTADO_2025,
 )
 from dropbox_io import download, token_e_rev, token_e_revs
+
+# Cod. Centro de Custo que começa com SIN/REG seguido de um número != 01
+# (ex: SIN02.25020, REG05.17189) é a mesma obra/projeto do SIN01/REG01
+# correspondente — uma variante de lançamento que só aparece no
+# Realizado (o Previsto e a classificação manual só usam SIN01/REG01).
+# Confirmado pelo usuário, 2026-10-28: normaliza o prefixo numérico pra 01,
+# mantendo o resto do código (o ".sufixo") idêntico — sem isso esse
+# Realizado nunca concilia com o Previsto nem encontra a categoria
+# classificada manualmente (caem como código "novo", não como SIN01/REG01).
+_RE_PREFIXO_SIN_REG = re.compile(r"^(SIN|REG)\d+(\.)")
+
+
+def normalizar_codigo_cc(codigo):
+    if not isinstance(codigo, str):
+        return codigo
+    return _RE_PREFIXO_SIN_REG.sub(r"\g<1>01\2", codigo)
+
 
 MESES_COLUNA = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 MES_NUMERO = {nome: i + 1 for i, nome in enumerate(MESES_COLUNA)}
@@ -122,6 +140,7 @@ def _ler_realizado(_token: str, cache_key: str) -> pd.DataFrame:
     content = download(_token, DROPBOX_REALIZADO)
     df = pd.read_excel(BytesIO(content), sheet_name="Planilha1", engine="calamine")
     df["Mes"] = df["Data"].values.astype("datetime64[M]")
+    df["Cod. Centro de Custo"] = df["Cod. Centro de Custo"].map(normalizar_codigo_cc)
     return df
 
 
@@ -226,6 +245,7 @@ _FATO_CONTABIL_PARA_CODIGO_REV01 = {
 def _ler_previsto_rev00(content: bytes, sheet_name: str, cenario: str) -> pd.DataFrame:
     df = pd.read_excel(BytesIO(content), sheet_name=sheet_name, engine="calamine")
     df = df.rename(columns={"Unnamed: 0": "Codigo", "Cód. Centro de custo": "CC"})
+    df["CC"] = df["CC"].map(normalizar_codigo_cc)
     for mes in MESES_COLUNA:
         df[mes] = pd.to_numeric(df[mes], errors="coerce").fillna(0)
     df["Cenário"] = cenario
@@ -243,6 +263,7 @@ def _ler_previsto_rev00(content: bytes, sheet_name: str, cenario: str) -> pd.Dat
 def _ler_previsto_rev01(content: bytes) -> pd.DataFrame:
     df = pd.read_excel(BytesIO(content), sheet_name="BASE_PREVISTO", engine="calamine")
     df = df.rename(columns={"Cód. Centro de custo": "CC"})
+    df["CC"] = df["CC"].map(normalizar_codigo_cc)
     df["Codigo"] = df["Fato Contábil"].map(_FATO_CONTABIL_PARA_CODIGO_REV01)
     df["Cenário"] = "Otimista"
     df["Revisão"] = "REV01"
@@ -357,6 +378,7 @@ def _ler_refinado_detalhado(_token: str, cache_key: str) -> pd.DataFrame:
         names=["Classificacao", "Revisao", "CC", "Complexo", "Area", "Gerencia", "Cenario", "Analise", "Mes", "Valor"],
         header=0,
     )
+    df["CC"] = df["CC"].map(normalizar_codigo_cc)
     return df[df["Revisao"].isin(REVISOES_REFINADO)]
 
 
@@ -408,7 +430,7 @@ def _ler_tabela_dimensao(_token: str, cache_key: str) -> pd.DataFrame:
     sub = df[["Cod. Centro de Custo", "Centro de Custo"]].copy()
     sub.columns = ["Codigo", "Centro de Custo"]
     sub = sub.dropna(subset=["Codigo"])
-    sub["Codigo"] = sub["Codigo"].astype(str)
+    sub["Codigo"] = sub["Codigo"].astype(str).map(normalizar_codigo_cc)
     # "FUNIL DE VENDAS" é um código-bucket (placeholder de pipeline, usado
     # por dezenas de Complexos diferentes em "Dados Refinado" — não um
     # Centro de Custo de verdade) — nessa aba ele aparece casado com um
@@ -641,6 +663,8 @@ def _ler_onepage_rev03_detalhado(_token: str, cache_key: str) -> pd.DataFrame:
     df = df.rename(columns={"Análise de emissão": "Analise", "Atributo": "Mes", "Área": "Area"})
     df = df[(df["Revisão"] == "REV03") & (df["Analise"].isin([ANALISE_DESPESA_ADM_REV03, ANALISE_DESPESA_FINANCEIRA_REV03]))]
     df["Mes"] = pd.to_datetime(df["Mes"]).values.astype("datetime64[M]")
+    if "CC" in df.columns:
+        df["CC"] = df["CC"].map(normalizar_codigo_cc)
     return df
 
 
