@@ -1145,7 +1145,7 @@ col_rec_acum.markdown(
     render_caixa_narrativa(
         "ANÁLISE DE ACUMULADO",
         gerar_analise(
-            "Receita Bruta Acumulada", f"Acumulado {ano}",
+            "Receita Bruta", f"Acumulado {ano}",
             dre_acum_real["receita_bruta"], dre_acum_orc.get("receita_bruta"),
             receita_real_acum_cat, receita_orc_acum_cat, favoravel_se_maior=True,
         ),
@@ -1222,7 +1222,7 @@ col_lb_acum.markdown(
     render_caixa_narrativa(
         "ANÁLISE DE ACUMULADO",
         gerar_analise(
-            "Lucro Bruto Acumulado", f"Acumulado {ano}",
+            "Lucro Bruto", f"Acumulado {ano}",
             lucro_real_acum_cat.sum(), lucro_orc_acum_cat.sum() if lucro_orc_acum_cat is not None else None,
             lucro_real_acum_cat, lucro_orc_acum_cat, favoravel_se_maior=True,
         ),
@@ -1305,7 +1305,7 @@ col_desp_acum.markdown(
     render_caixa_narrativa(
         "ANÁLISE DE ACUMULADO",
         gerar_analise(
-            "Despesa Administrativa Acumulada", f"Acumulado {ano}",
+            "Despesa Administrativa", f"Acumulado {ano}",
             -dre_acum_real["despesa_adm"],
             -despesa_orc_acum_total if despesa_orc_acum_total is not None else None,
             despesa_real_acum_cat, despesa_orc_acum_cat, favoravel_se_maior=False,
