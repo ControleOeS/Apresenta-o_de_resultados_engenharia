@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 import pandas as pd
@@ -16,7 +17,9 @@ from config import (
     DROPBOX_REFINADO_ENGENHARIAS,
     DROPBOX_RESULTADO_2025,
 )
-from dropbox_io import download, token_e_rev, token_e_revs
+from dropbox_io import download, get_metadata, token_e_rev, token_e_revs
+
+FUSO_BRASIL = timezone(timedelta(hours=-3))  # Brasília, sem horário de verão desde 2019
 
 # Cod. Centro de Custo que começa com SIN/REG seguido de um número != 01
 # (ex: SIN02.25020, REG05.17189) é a mesma obra/projeto do SIN01/REG01
@@ -154,6 +157,21 @@ def carregar_realizado() -> pd.DataFrame:
 def carregar_realizado_superus() -> pd.DataFrame:
     df = carregar_realizado()
     return df[df["Coligada"].isin(COLIGADAS_SUPERUS)]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def last_update_dt() -> datetime:
+    """Momento (UTC, aware) da última gravação do arquivo de Realizado no
+    Dropbox — cacheado por 60s (item 33, 2026-11-11), mesmo padrão do
+    DASH_DIRETORIA."""
+    token, _ = token_e_rev(DROPBOX_REALIZADO)
+    meta = get_metadata(token, DROPBOX_REALIZADO)
+    return datetime.strptime(meta["server_modified"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def last_update() -> str:
+    dt_local = last_update_dt().astimezone(FUSO_BRASIL)
+    return dt_local.strftime("%d/%m/%Y %H:%M")
 
 
 @st.cache_data(show_spinner="Lendo Realizado 2025 do Dropbox...")

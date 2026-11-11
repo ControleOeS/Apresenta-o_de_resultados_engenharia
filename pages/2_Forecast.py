@@ -14,7 +14,7 @@ from dados import (
     carregar_realizado_superus,
 )
 from estilo import VERDE_ESCURO, VERMELHO, render_tabela_com_faixa
-from formatting import format_brl_md, format_pct, format_pct_av
+from formatting import format_brl_md, format_pct_av, format_pp
 from forecast import (
     CLASSIFICACAO_FUNIL_VENDAS,
     LINHAS_RECEITA_SEED,
@@ -69,7 +69,9 @@ def _chave_mes(mes: pd.Timestamp) -> str:
 
 
 def _rotulo_mes(mes: pd.Timestamp) -> str:
-    sufixo = " *Forecast*" if mes in meses_fc else ""
+    # Nome de coluna de tabela não renderiza Markdown — "*Forecast*" aparecia
+    # com os asteriscos literais na tela (item 16, 2026-11-11).
+    sufixo = " (Forecast)" if mes in meses_fc else ""
     return f"{MESES_PT[mes.month]}/{str(mes.year)[2:]}{sufixo}"
 
 
@@ -147,7 +149,8 @@ valores_total = [editado[rotulo].fillna(0).sum() for rotulo in rotulos_meses]
 total_geral_ano = sum(valores_total) or 1
 
 TH_P7 = f"padding:5px 8px; text-align:right; background-color:{VERDE_ESCURO}; color:white; font-weight:700; white-space:nowrap; font-size:0.78rem;"
-TH_ROTULO = f"text-align:left; padding:6px 12px; background-color:{VERDE_ESCURO}; color:white;"
+# position:sticky: 1a coluna fixa na rolagem horizontal (item 29).
+TH_ROTULO = f"text-align:left; padding:6px 12px; background-color:{VERDE_ESCURO}; color:white; position:sticky; left:0; z-index:2;"
 
 
 def _linha_resumo_html(rotulo: str, valores: list[float]) -> str:
@@ -158,7 +161,7 @@ def _linha_resumo_html(rotulo: str, valores: list[float]) -> str:
     total_linha = sum(valores)
     av = format_pct_av(total_linha, total_geral_ano)
     return (
-        f"<tr style='font-weight:700; background-color:#DCE8CB;'><td style='padding:4px 10px; white-space:nowrap; font-size:0.8rem;'>{rotulo}</td>"
+        f"<tr style='font-weight:700; background-color:#DCE8CB;'><td style='padding:4px 10px; white-space:nowrap; font-size:0.8rem; position:sticky; left:0; z-index:1; background-color:#DCE8CB;'>{rotulo}</td>"
         f"{celulas}<td style='padding:4px 8px; text-align:right; font-weight:700; white-space:nowrap; font-size:0.78rem;'>{format_brl_md(total_linha)}</td>"
         f"<td style='padding:4px 8px; text-align:right; white-space:nowrap; font-size:0.78rem;'>{av}</td></tr>"
     )
@@ -173,7 +176,7 @@ tabela_resumo_html = (
     + _linha_resumo_html("Total", valores_total)
     + "</table>"
 )
-st.markdown(tabela_resumo_html, unsafe_allow_html=True)
+st.markdown(f"<div style='overflow-x:auto;'>{tabela_resumo_html}</div>", unsafe_allow_html=True)
 
 st.divider()
 
@@ -345,39 +348,40 @@ def _td_valor(valor) -> str:
 
 linhas_html = []
 for nome, campo, destaque in LINHAS_DRE_DEF:
-    estilo_linha = "font-weight:700; background-color:#EAF2E0;" if destaque else "background-color:#FFFFFF;"
+    cor_fundo_linha = "#EAF2E0" if destaque else "#FFFFFF"
+    estilo_linha = f"font-weight:700; background-color:{cor_fundo_linha};" if destaque else f"background-color:{cor_fundo_linha};"
     celulas = "".join(_td_valor(dre_por_mes[mes][campo]) for mes in dre_por_mes)
     celula_total = _td_valor(dre_total_ano[campo])
     celula_meta = _td_valor(meta_total_ano[campo])
     celula_delta = _td_valor(dre_total_ano[campo] - meta_total_ano[campo])
     linhas_html.append(
-        f"<tr style='{estilo_linha}'><td style='padding:6px 10px; white-space:nowrap;'>{nome}</td>"
+        f"<tr style='{estilo_linha}'><td style='padding:6px 10px; white-space:nowrap; position:sticky; left:0; z-index:1; background-color:{cor_fundo_linha};'>{nome}</td>"
         f"{celulas}{celula_total}{_espacador_td()}{celula_meta}{celula_delta}</tr>"
     )
     if campo in LINHAS_MARGEM:
+        def _td_pct(valor, base) -> str:
+            cor = f"color:{VERMELHO};" if (valor or 0) < 0 else ""
+            return f"<td style='padding:4px 6px; text-align:right; {cor}'>{format_pct_av(valor, base, manter_sinal=True)}</td>"
+
         celulas_pct = "".join(
-            f"<td style='padding:4px 6px; text-align:right;'>{format_pct_av(dre_por_mes[mes][campo], dre_por_mes[mes]['receita_liquida'])}</td>"
-            for mes in dre_por_mes
+            _td_pct(dre_por_mes[mes][campo], dre_por_mes[mes]["receita_liquida"]) for mes in dre_por_mes
         )
-        celula_pct_total = f"<td style='padding:4px 6px; text-align:right;'>{format_pct_av(dre_total_ano[campo], base_av_ano)}</td>"
+        celula_pct_total = _td_pct(dre_total_ano[campo], base_av_ano)
         pct_meta = meta_total_ano[campo] / meta_total_ano["receita_liquida"] if meta_total_ano["receita_liquida"] else None
         pct_forecast = dre_total_ano[campo] / base_av_ano if base_av_ano else None
-        celula_pct_meta = (
-            f"<td style='padding:4px 6px; text-align:right;'>"
-            f"{format_pct_av(meta_total_ano[campo], meta_total_ano['receita_liquida'])}</td>"
-        )
+        celula_pct_meta = _td_pct(meta_total_ano[campo], meta_total_ano["receita_liquida"])
         delta_pp = None if pct_meta is None or pct_forecast is None else pct_forecast - pct_meta
-        celula_pct_delta = f"<td style='padding:4px 6px; text-align:right;'>{format_pct(delta_pp)}</td>"
+        celula_pct_delta = f"<td style='padding:4px 6px; text-align:right;'>{format_pp(delta_pp)}</td>"
         linhas_html.append(
             "<tr style='font-style:italic; color:#555; background-color:#F7F9F4;'>"
-            f"<td style='padding:4px 10px 4px 20px;'>{LINHAS_MARGEM[campo]}</td>"
+            f"<td style='padding:4px 10px 4px 20px; position:sticky; left:0; z-index:1; background-color:#F7F9F4;'>{LINHAS_MARGEM[campo]}</td>"
             f"{celulas_pct}{celula_pct_total}{_espacador_td()}{celula_pct_meta}{celula_pct_delta}</tr>"
         )
 
 cabecalho_meses = "".join(f"<th style='{TH_VALOR}'>{MESES_PT[mes.month]}/{str(mes.year)[2:]}</th>" for mes in dre_por_mes)
 tabela_dre_html = (
     "<table style='width:100%; border-collapse:collapse; font-size:0.8rem; color:#1a1a1a;'>"
-    f"<tr><th style='{TH_ROTULO}'>DRE - Engenharia</th>{cabecalho_meses}<th style='{TH_VALOR}'>Total {ano}</th>"
+    f"<tr><th style='{TH_ROTULO}'>DRE - Superus Engenharia</th>{cabecalho_meses}<th style='{TH_VALOR}'>Total {ano}</th>"
     f"{_espacador_th()}<th style='{TH_META}'>Meta Otimista</th><th style='{TH_DELTA}'>Δ Forecast-Meta</th></tr>"
     + "".join(linhas_html)
     + "</table>"

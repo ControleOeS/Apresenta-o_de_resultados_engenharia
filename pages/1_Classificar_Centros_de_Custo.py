@@ -9,7 +9,7 @@ from classificacoes import (
     remover_categoria,
     salvar_classificacoes,
 )
-from dados import carregar_previsto, carregar_realizado_superus
+from dados import carregar_previsto, carregar_realizado_superus, carregar_refinado_detalhado, tabela_dimensao_centro_de_custo
 from auth import mostrar_banner_ambiente, require_password
 
 st.set_page_config(page_title="Classificar Centros de Custo", page_icon="🏷️", layout="wide")
@@ -19,8 +19,8 @@ st.title("Classificar Centros de Custo")
 st.caption(
     "Associe cada Centro de Custo a uma categoria — de Receita (BackLog Ativo, BackLog "
     "Novo, Funil de Vendas...) ou de Despesa/SGA (Operação, Comercial, Administração...). "
-    "Fica salvo neste computador (não depende de deixar o app aberto) e passa a ser usado "
-    "pelas análises por categoria."
+    "Fica salvo no Dropbox (mesma base usada pelo resto do app — não depende de deixar "
+    "este computador ligado) e passa a ser usado pelas análises por categoria."
 )
 
 SEM_CATEGORIA = "— sem categoria —"
@@ -60,6 +60,8 @@ st.divider()
 
 df_real = carregar_realizado_superus()
 df_previsto = carregar_previsto()
+df_refinado_detalhado = carregar_refinado_detalhado()
+tabela_dimensao = tabela_dimensao_centro_de_custo()
 
 reais = df_real[["Cod. Centro de Custo", "Centro de Custo"]].dropna().copy()
 reais.columns = ["codigo", "nome"]
@@ -69,8 +71,21 @@ prevs = df_previsto[["CC", "Centro de Custo"]].dropna().copy()
 prevs.columns = ["codigo", "nome"]
 prevs["codigo"] = prevs["codigo"].astype(str)
 
+# Orçado da REV02/REV03 (Refinado Engenharias) não tinha entrada aqui — só
+# Realizado + Previsto "antigo" (REV00/REV01) — por isso códigos que só
+# existem no Refinado (ex: FUNIL DE VENDAS, CATERING) nunca apareciam pra
+# classificar, mesmo aparecendo como "Não classificado" nos gráficos da
+# página principal (item 5, 2026-11-11). Nome vem da tabela dimensão;
+# sem nome lá (caso dos pseudo-centros de propósito, ver dados.py), usa o
+# próprio código.
+mapa_nomes_dimensao = tabela_dimensao.set_index("Codigo")["Centro de Custo"].to_dict()
+refinados = df_refinado_detalhado[["CC"]].dropna().drop_duplicates().copy()
+refinados.columns = ["codigo"]
+refinados["codigo"] = refinados["codigo"].astype(str)
+refinados["nome"] = refinados["codigo"].map(mapa_nomes_dimensao).fillna(refinados["codigo"])
+
 todos = (
-    pd.concat([reais, prevs], ignore_index=True)
+    pd.concat([reais, prevs, refinados], ignore_index=True)
     .drop_duplicates(subset="codigo")
     .sort_values("nome")
     .reset_index(drop=True)
