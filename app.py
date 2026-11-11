@@ -54,11 +54,23 @@ from analise_categoria import (
     receita_por_categoria_realizado,
     receita_por_cc_previsto,
     receita_por_cc_realizado,
+    todas_categorias_conhecidas,
 )
-from graficos_categoria import grafico_categoria_empilhado
+from graficos_categoria import grafico_categoria_empilhado, mapa_cores_categorias
 from auth import mostrar_banner_ambiente, require_password
 
 st.set_page_config(page_title="Apresentação de Resultados", page_icon="📊", layout="wide")
+
+# Guarda os query params (?mes=...&revisao=...) em session_state ANTES do
+# gate de login — se reabrir um link assim cai na tela "Acesso Restrito" e,
+# pelo relato do usuário, os filtros voltam ao padrão depois de logar (item
+# 31, 2026-11-11). Fallback de leitura, não mexe na senha (st.secrets) nem
+# adiciona nenhuma persistência de sessão nova.
+if st.query_params.get("mes"):
+    st.session_state["_qp_mes"] = st.query_params.get("mes")
+if st.query_params.get("revisao"):
+    st.session_state["_qp_revisao"] = st.query_params.get("revisao")
+
 require_password()
 mostrar_banner_ambiente()
 
@@ -1098,17 +1110,23 @@ def _render_categoria_com_drilldown(
             )
 
 
+
+# Cor fixa por categoria (item 26) — calculada uma vez com a lista
+# canônica inteira, reaproveitada nos 3 blocos (Receita/Lucro Bruto/
+# Despesa) × (Mês/Acumulado), não recalculada por gráfico.
+mapa_cores_cat = mapa_cores_categorias(todas_categorias_conhecidas())
+
 st.subheader("Receita Bruta por Categoria (em R$)")
 col_rec_mes, col_rec_acum = st.columns(2)
 col_rec_mes.plotly_chart(
     grafico_categoria_empilhado(
-        f"Receita Bruta (R$/Mil) — {nome_mes}/{ano}", receita_orc_mes_cat, receita_real_mes_cat, format_brl_compacto
+        f"Receita Bruta (em R$) — {nome_mes}/{ano}", receita_orc_mes_cat, receita_real_mes_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
 col_rec_acum.plotly_chart(
     grafico_categoria_empilhado(
-        f"Receita Bruta (R$/Mil) — Acumulado {ano}", receita_orc_acum_cat, receita_real_acum_cat, format_brl_compacto
+        f"Receita Bruta (em R$) — Acumulado {ano}", receita_orc_acum_cat, receita_real_acum_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
@@ -1179,13 +1197,13 @@ st.subheader("Lucro Bruto por Categoria (em R$)")
 col_lb_mes, col_lb_acum = st.columns(2)
 col_lb_mes.plotly_chart(
     grafico_categoria_empilhado(
-        f"Lucro Bruto (R$/Mil) — {nome_mes}/{ano}", lucro_orc_mes_cat, lucro_real_mes_cat, format_brl_compacto
+        f"Lucro Bruto (em R$) — {nome_mes}/{ano}", lucro_orc_mes_cat, lucro_real_mes_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
 col_lb_acum.plotly_chart(
     grafico_categoria_empilhado(
-        f"Lucro Bruto (R$/Mil) — Acumulado {ano}", lucro_orc_acum_cat, lucro_real_acum_cat, format_brl_compacto
+        f"Lucro Bruto (em R$) — Acumulado {ano}", lucro_orc_acum_cat, lucro_real_acum_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
@@ -1252,17 +1270,17 @@ if despesa_orc_mes_cat is not None:
 if despesa_orc_acum_cat is not None:
     despesa_orc_acum_cat = -despesa_orc_acum_cat
 
-st.subheader("Despesa Administrativa por Categoria (em R$)")
+st.subheader("Despesa Total por Categoria (em R$)")
 col_desp_mes, col_desp_acum = st.columns(2)
 col_desp_mes.plotly_chart(
     grafico_categoria_empilhado(
-        f"Despesa Total (R$/Mil) — {nome_mes}/{ano}", despesa_orc_mes_cat, despesa_real_mes_cat, format_brl_compacto
+        f"Despesa Total (em R$) — {nome_mes}/{ano}", despesa_orc_mes_cat, despesa_real_mes_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
 col_desp_acum.plotly_chart(
     grafico_categoria_empilhado(
-        f"Despesa Total (R$/Mil) — Acumulado {ano}", despesa_orc_acum_cat, despesa_real_acum_cat, format_brl_compacto
+        f"Despesa Total (em R$) — Acumulado {ano}", despesa_orc_acum_cat, despesa_real_acum_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
