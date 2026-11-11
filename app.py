@@ -585,10 +585,11 @@ st.divider()
 # ------------------------------------------------------------------
 st.header("Curva S — Orçado x Realizado Acumulado")
 st.caption(
-    "Acumulado mês a mês ao longo do ano inteiro (independe do Mês de referência "
-    "filtrado na barra lateral) — Realizado comparado ao Orçado efetivo de cada "
-    "Cenário (Moderado e Otimista) na Revisão selecionada, para a linha do DRE "
-    "escolhida abaixo."
+    "Acumulado mês a mês ao longo do ano inteiro — o Orçado mostra o ano inteiro "
+    "independente do Mês de referência filtrado na barra lateral (Realizado "
+    "comparado ao Orçado efetivo de cada Cenário, Moderado e Otimista, na Revisão "
+    "selecionada); o Realizado é cortado nesse Mês de referência (ver nota abaixo), "
+    "para a linha do DRE escolhida abaixo."
 )
 
 col_curva_s_linha, col_curva_s_base = st.columns([2, 1])
@@ -616,6 +617,55 @@ else:
 
 COR_ORCADO_MODERADO = "#00465C"  # ponta esquerda do GRADIENTE_BANNER — distingue do verde do Otimista
 
+# Linhas de dedução (convenção de sinal negativo) que o usuário prefere ver
+# subindo (valor absoluto) na Curva S — mais fácil comparar magnitude entre
+# Realizado/Orçado do que com a curva descendo. Sinal original preservado
+# só no tooltip (via customdata). Confirmado pelo usuário, 2026-11-11 (item
+# 12) — lista literal pedida, não generalizada pra outras linhas de
+# dedução (ex.: Imposto de Renda fica como estava, sinal original plotado).
+CAMPOS_CURVA_S_ABSOLUTO = {"custo", "imposto", "despesa_adm", "despesa_financeira"}
+
+
+def _ticks_bonitos(valor_min: float, valor_max: float, n: int = 5) -> list[float]:
+    """Posições de tick "redondas" e igualmente espaçadas (algoritmo clássico
+    de "nice numbers" — degrau arredondado pra 1/2/5×10^k), igual ao que o
+    tickformat automático do Plotly faria — mas aqui calculado à mão porque
+    precisamos interceptar o texto de cada tick (format_brl_compacto em vez
+    do sufixo em inglês do Plotly, item 13)."""
+    import math
+
+    if valor_max == valor_min:
+        return [valor_min]
+    alcance_bruto = (valor_max - valor_min) / max(n - 1, 1)
+    magnitude = 10 ** math.floor(math.log10(abs(alcance_bruto)))
+    passo_normalizado = alcance_bruto / magnitude
+    if passo_normalizado < 1.5:
+        passo = magnitude
+    elif passo_normalizado < 3:
+        passo = 2 * magnitude
+    elif passo_normalizado < 7:
+        passo = 5 * magnitude
+    else:
+        passo = 10 * magnitude
+    primeiro = math.floor(valor_min / passo) * passo
+    ultimo = math.ceil(valor_max / passo) * passo
+    n_ticks = int(round((ultimo - primeiro) / passo)) + 1
+    return [primeiro + i * passo for i in range(n_ticks)]
+
+
+def _ticktext_compacta(valores) -> list[str]:
+    """Rótulo de eixo na mesma função de formatação dos rótulos de dado
+    (format_brl_compacto) — "Mi"/"mil" em vez do tickformat nativo do
+    Plotly (",.2s", que produz "50M" em inglês); "0" em vez de "0,0" no
+    zero (item 13, 2026-11-11)."""
+    textos = []
+    for v in valores:
+        if v == 0:
+            textos.append("0")
+        else:
+            textos.append(format_brl_compacto(v))
+    return textos
+
 
 def _grafico_curva_s(
     df_real_mensal: pd.DataFrame,
@@ -628,18 +678,25 @@ def _grafico_curva_s(
 ) -> tuple[go.Figure, list[str]]:
     meses_ano_cs = list(pd.date_range(f"{ano_cs}-01-01", f"{ano_cs}-12-01", freq="MS"))
     fig = go.Figure()
-    hover = "%{x|%b/%Y}<br>%{fullData.name}: R$ %{y:,.2f}<extra></extra>"
+    em_valor_absoluto = campo in CAMPOS_CURVA_S_ABSOLUTO
+    # Com sinal original preservado via customdata, o hover mostra o valor
+    # de verdade mesmo quando a curva plota o módulo (item 12).
+    hover = "%{x|%b/%Y}<br>%{fullData.name}: R$ %{customdata:,.2f}<extra></extra>"
     avisos: list[str] = []
+    todos_os_valores: list[float] = []
 
     if not df_real_mensal.empty and campo in df_real_mensal.columns:
         serie_real = df_real_mensal.set_index("Mes")[campo].reindex(meses_ano_cs)
         acumulado_real = serie_real.cumsum().dropna()
         if not acumulado_real.empty:
+            valores_plotados = acumulado_real.abs().values if em_valor_absoluto else acumulado_real.values
+            todos_os_valores.extend(valores_plotados)
             fig.add_trace(
                 go.Scatter(
                     x=acumulado_real.index,
-                    y=acumulado_real.values,
-                    mode="lines",
+                    y=valores_plotados,
+                    customdata=acumulado_real.values,
+                    mode="lines+markers",
                     name=nome_real,
                     line=dict(color=VERDE_ESCURO, width=4),
                     hovertemplate=hover,
@@ -658,11 +715,14 @@ def _grafico_curva_s(
             avisos.append(f"{nome_serie}: N/D para \"{nome_linha}\" em pelo menos um mês do ano — curva não exibida.")
             continue
         acumulado_orc = serie_orc.cumsum()
+        valores_plotados = acumulado_orc.abs().values if em_valor_absoluto else acumulado_orc.values
+        todos_os_valores.extend(valores_plotados)
         fig.add_trace(
             go.Scatter(
                 x=acumulado_orc.index,
-                y=acumulado_orc.values,
-                mode="lines",
+                y=valores_plotados,
+                customdata=acumulado_orc.values,
+                mode="lines+markers",
                 name=nome_serie,
                 line=dict(color=cor, width=2, dash=tracejado),
                 hovertemplate=hover,
@@ -671,7 +731,6 @@ def _grafico_curva_s(
 
     fig.update_layout(
         separators=",.",
-        yaxis_tickformat=",.2s",
         plot_bgcolor="#FFFFFF",
         paper_bgcolor="#FFFFFF",
         height=420,
@@ -679,8 +738,23 @@ def _grafico_curva_s(
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
         margin=dict(t=30, b=10, l=70, r=10),
     )
-    fig.update_xaxes(tickformat="%b/%Y", showgrid=False)
-    fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor="#CCCCCC")
+    # Eixo X: os 12 meses em pt-BR (item 11) — tickformat nativo do Plotly
+    # usa locale em inglês e escolhe o passo automaticamente (de 2 em 2
+    # meses quando não cabem os 12).
+    fig.update_xaxes(
+        tickvals=meses_ano_cs,
+        ticktext=[f"{MESES_PT[m.month]}/{str(m.year)[2:]}" for m in meses_ano_cs],
+        showgrid=False,
+    )
+    if todos_os_valores:
+        y_ticks = _ticks_bonitos(min(0, min(todos_os_valores)), max(0, max(todos_os_valores)))
+        fig.update_yaxes(
+            tickvals=y_ticks,
+            ticktext=_ticktext_compacta(y_ticks),
+            zeroline=True, zerolinewidth=2, zerolinecolor="#CCCCCC",
+        )
+    else:
+        fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor="#CCCCCC")
     return fig, avisos
 
 
