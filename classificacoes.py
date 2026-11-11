@@ -55,6 +55,13 @@ def remover_categoria(categoria: str) -> list[str]:
 # analise_categoria.py), pra ficar igual entre Previsto e Realizado.
 CLASSIFICACOES_FIXAS: dict[str, dict[str, str]] = {
     "AJUSTE": {"nome": "AJUSTE", "categoria": "Backlog Ativo"},
+    # Mapeamento automático confirmado pelo usuário (2026-11-11, item 5): é
+    # um código-bucket do Funil de Vendas (não tem nome de projeto real —
+    # ver comentário de _ler_tabela_dimensao em dados.py), aparecia como
+    # "Não classificado" nos gráficos da página principal mesmo nunca indo
+    # aparecer na página "Classificar Centros de Custo" (ela só lista
+    # códigos de Realizado/Previsto "antigo", não os do Refinado).
+    "FUNIL DE VENDAS": {"nome": "FUNIL DE VENDAS", "categoria": "Funil de Vendas"},
     "JURIDICO": {"nome": "JURIDICO", "categoria": "Não operacional"},
     "PLR": {"nome": "PLR GESTORES", "categoria": "PLR"},
     "SEM RATEIO": {"nome": "SEM RATEIO", "categoria": "Outros"},
