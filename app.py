@@ -943,7 +943,13 @@ def _config_colunas_com_textuais(colunas_numericas: list[str], colunas_textuais:
         if nome in colunas_textuais:
             config[nome] = st.column_config.TextColumn(nome)
         else:
-            config[nome] = st.column_config.NumberColumn(nome, format="localized")
+            # step=1 força exibição inteira (sem casas decimais) mantendo o
+            # separador localizado — não afeta o valor numérico de verdade
+            # usado pra ordenar (doc do NumberColumn: "step... ensures a
+            # consistent number of digits after the decimal"). Sem isso,
+            # valores apareciam com 0 a 3 casas decimais soltas (item 14,
+            # 2026-11-11).
+            config[nome] = st.column_config.NumberColumn(nome, format="localized", step=1)
     return config
 
 

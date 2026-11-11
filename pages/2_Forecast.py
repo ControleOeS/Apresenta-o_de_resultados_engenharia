@@ -130,7 +130,7 @@ editado = st.data_editor(
     disabled=True if not edicao_liberada else [*rotulos_realizado, f"Total {ano}", "AV%"],
     column_config={
         **{col: st.column_config.NumberColumn(col, format="localized", step=1000) for col in rotulos_meses},
-        f"Total {ano}": st.column_config.NumberColumn(f"Total {ano}", format="localized"),
+        f"Total {ano}": st.column_config.NumberColumn(f"Total {ano}", format="localized", step=1),
         "AV%": st.column_config.NumberColumn("AV%", format="percent"),
     },
     key="editor_receita_mensal",
@@ -213,6 +213,15 @@ for _, linha in editado.iterrows():
     linhas_lucro.append(registro)
 
 tabela_lucro = pd.DataFrame(linhas_lucro)
+# Coluna que mistura float e None (linha "Super Meta" sem Receita Bruta no
+# mês, ver lucro_bruto_padrao acima) fica com dtype object — o grid do
+# data_editor mostra um None de coluna-objeto como texto literal "None"
+# (um NaN de coluna float fica em branco). Cast pra float converte None
+# em NaN automaticamente — só exibição, não mexe na leitura/salvamento
+# (que já trata pd.isna() corretamente). Item 15, 2026-11-11.
+for _col in rotulos_fc:
+    if _col in tabela_lucro.columns:
+        tabela_lucro[_col] = tabela_lucro[_col].astype(float)
 editado_lucro = st.data_editor(
     tabela_lucro,
     hide_index=True,
