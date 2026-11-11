@@ -117,6 +117,8 @@ def calcular_dre(df: pd.DataFrame) -> dict:
         "margem_bruta": margem_bruta,
         "despesa_adm": despesa_adm,
         "ebitda": ebitda,
+        "outros": outros,
+        "ebit": ebit,
         "despesa_financeira": despesa_financeira,
         "lair": lair,
         "imposto_renda": imposto_renda,
@@ -804,13 +806,20 @@ def _despesa_mensal_com_fonte_nova(
     `despesa_financeira_mensal_nova` quando informada (REV03, fonte
     própria no ONEPAGE_REV03.xlsx); senão (REV02, ainda sem fonte própria)
     segue emprestada da REV01. Imposto de Renda segue 100% emprestado da
-    REV01 pras duas, sem fonte própria ainda."""
+    REV01 pras duas, sem fonte própria ainda.
+
+    "Outros Itens não Operacionais" também espelha o Realizado nos meses
+    antes do corte (igual aos outros campos aqui) — nos meses dentro da
+    janela de previsão real, fica 0 (a Revisão não tem fonte própria pra
+    isso). Sem isso, o LAIR do período acumulado não batia com o Realizado
+    mesmo quando TODOS os meses estavam espelhando (ex.: Set/26+REV03,
+    resíduo de R$600 — confirmado pelo usuário, 2026-11-11, item 6)."""
     mes_corte = mes_corte_revisao(revisao, pd.Timestamp(mes_fim).year)
 
     financeira_rev01 = _serie_mensal_previsto(df_previsto, "REV01", cenario, CODIGO_DESPESA_FINANCEIRA)
     ir_rev01 = _serie_mensal_previsto(df_previsto, "REV01", cenario, CODIGO_IMPOSTO_RENDA)
 
-    despesa_adm = despesa_financeira = imposto_renda = 0.0
+    despesa_adm = despesa_financeira = imposto_renda = outros = 0.0
     algum_mes_provisorio = False
     for mes in pd.date_range(mes_ini, mes_fim, freq="MS"):
         if mes < mes_corte:
@@ -818,6 +827,7 @@ def _despesa_mensal_com_fonte_nova(
             despesa_adm += dre_mes["despesa_adm"]
             despesa_financeira += dre_mes["despesa_financeira"]
             imposto_renda += dre_mes["imposto_renda"]
+            outros += dre_mes["outros"]
             continue
         despesa_adm += despesa_adm_mensal_nova.get(mes, 0.0)
         if despesa_financeira_mensal_nova is not None:
@@ -831,10 +841,12 @@ def _despesa_mensal_com_fonte_nova(
         "despesa_adm": despesa_adm,
         "despesa_financeira": despesa_financeira,
         "imposto_renda": imposto_renda,
+        "outros": outros,
         "provisorio": algum_mes_provisorio,
     }
 
 
+@st.cache_data(show_spinner=False)
 def _receita_custo_mensal_com_mes_corte(
     df_real: pd.DataFrame, df_refinado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim
 ) -> dict | None:
@@ -922,10 +934,12 @@ def calcular_previsto_com_fallback_despesa(
     resultado["ebitda"] = (
         base["margem_bruta"] + resultado["despesa_adm"] if resultado["despesa_adm"] is not None else None
     )
+    resultado["outros"] = despesa.get("outros") or 0.0
+    resultado["ebit"] = resultado["ebitda"] + resultado["outros"] if resultado["ebitda"] is not None else None
     resultado["despesa_financeira"] = despesa.get("despesa_financeira")
     resultado["lair"] = (
-        resultado["ebitda"] + resultado["despesa_financeira"]
-        if resultado["ebitda"] is not None and resultado["despesa_financeira"] is not None
+        resultado["ebit"] + resultado["despesa_financeira"]
+        if resultado["ebit"] is not None and resultado["despesa_financeira"] is not None
         else None
     )
     resultado["imposto_renda"] = despesa.get("imposto_renda")
