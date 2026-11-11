@@ -23,6 +23,7 @@ Critério de status confirmado com o usuário:
   da Revisão/Cenário selecionada."""
 
 import pandas as pd
+import streamlit as st
 
 from dados import NIVEL_CUSTO, NIVEL_RECEITA_BRUTA, custo_por_cc_refinado, receita_por_cc_refinado
 
@@ -105,8 +106,40 @@ class AnaliseComplexos:
     def status_todos(self) -> dict[str, str]:
         return {c: self.status(c) for c in self.complexos}
 
+    def janela_sem_historico(self) -> bool:
+        """True quando `mes_ref` cai nos primeiros `MESES_NOVO_MOBILIZADO`
+        meses em que a base de Realizado tem QUALQUER dado — nesse caso,
+        por construção (sem Centro de Custo de 2025 disponível nesta base,
+        só uma DRE 2025 já agregada), nenhum complexo pode ser "Backlog
+        Ativo" ainda, só "Novo Mobilizado"/"Em Mobilização": confirmado
+        com o usuário, 2026-11-11 (item 4) — usado só pra mostrar um aviso
+        na tela, não muda a classificação em si."""
+        if not self._primeiro_mes_cc:
+            return False
+        inicio_base = min(self._primeiro_mes_cc.values())
+        meses_desde_inicio_base = (self.mes_ref.year - inicio_base.year) * 12 + (self.mes_ref.month - inicio_base.month)
+        return 0 <= meses_desde_inicio_base < MESES_NOVO_MOBILIZADO
+
     def complexos_operando(self) -> list[str]:
         """Backlog Ativo + Novo Mobilizado — só esses têm Real x Orçado
         comparável (Inativo não fatura mais, Em Mobilização nunca faturou)."""
         status = self.status_todos()
         return [c for c, s in status.items() if s in (STATUS_ATIVO, STATUS_NOVO)]
+
+
+@st.cache_data(show_spinner=False)
+def construir_analise_complexos(
+    df_real: pd.DataFrame,
+    df_refinado_detalhado: pd.DataFrame,
+    tabela_dimensao: pd.DataFrame,
+    mes_ref,
+    mes_ini_ano,
+    revisao: str,
+    cenario: str,
+) -> "AnaliseComplexos":
+    """Fábrica cacheada de AnaliseComplexos (item 32, 2026-11-11) — o
+    __init__ já faz groupby pesado sobre todo o histórico de Receita Bruta
+    (pra achar o primeiro mês de cada Centro de Custo) a cada instância;
+    sem cache isso recomputava do zero a cada rerun da página, mesmo com
+    Mês/Revisão/Cenário idênticos."""
+    return AnaliseComplexos(df_real, df_refinado_detalhado, tabela_dimensao, mes_ref, mes_ini_ano, revisao, cenario)

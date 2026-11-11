@@ -1240,11 +1240,28 @@ with st.expander("Ver valores em tabela (Despesa Total por Categoria)"):
 st.markdown("<div class='quebra-pagina'></div>", unsafe_allow_html=True)
 st.header("Análise de Complexos")
 
-analise_cpx = AnaliseComplexos(
+analise_cpx = construir_analise_complexos(
     df_real, df_refinado_detalhado, tabela_dimensao, mes_ref, mes_ini_ano, revisao_sel, cenario_sel
 )
 status_cpx = analise_cpx.status_todos()
 st.caption(f"Cobre todo Centro de Custo que já apareceu em Receita Bruta (Realizado ou Orçado) — {len(status_cpx)} ao todo.")
+if analise_cpx.janela_sem_historico():
+    st.info(
+        f"ℹ️ Nos primeiros {MESES_NOVO_MOBILIZADO} meses em que esta base tem dado (a partir de Jan/2026), "
+        "todo complexo ativo aparece como \"Novo Mobilizado\" — não existe histórico de 2025 por Centro de "
+        "Custo nesta base (só uma DRE 2025 já agregada, sem essa granularidade) pra distinguir de \"Ativo\"."
+    )
+
+# "Complexos Totais" não varia entre o bloco do Mês e o do Acumulado (vem
+# de status_cpx, calculado uma vez só acima) — mostrado uma única vez,
+# fora de _render_complexos_periodo (antes se repetia idêntico nos dois
+# blocos, item 4, 2026-11-11).
+from collections import Counter
+
+st.plotly_chart(
+    grafico_pizza_status(f"Complexos Totais: {len(status_cpx)}", Counter(status_cpx.values())),
+    use_container_width=True,
+)
 
 
 def _lista_nomeada(ccs) -> str:
