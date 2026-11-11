@@ -97,6 +97,7 @@ def _agrupar_serie(serie_cc: pd.Series) -> pd.Series:
     return df.groupby("Categoria")["Valor"].sum()
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def receita_por_categoria_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.Series:
     sub = df_real[
         df_real["Nível 1"].isin(NIVEL_RECEITA_BRUTA) & (df_real["Mes"] >= mes_ini) & (df_real["Mes"] <= mes_fim)
@@ -104,6 +105,7 @@ def receita_por_categoria_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> 
     return _agrupar(sub, "Cod. Centro de Custo")
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def despesa_por_categoria_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.Series:
     sub = df_real[
         df_real["Nível 1"].isin(NIVEL_DESPESA_ADM) & (df_real["Mes"] >= mes_ini) & (df_real["Mes"] <= mes_fim)
@@ -115,11 +117,13 @@ def despesa_por_categoria_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> 
     return resultado
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def custo_por_categoria_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.Series:
     sub = df_real[df_real["Nível 1"].isin(NIVEL_CUSTO) & (df_real["Mes"] >= mes_ini) & (df_real["Mes"] <= mes_fim)]
     return _agrupar(sub, "Cod. Centro de Custo")
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def imposto_por_categoria_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.Series:
     sub = df_real[df_real["Nível 1"].isin(NIVEL_IMPOSTO) & (df_real["Mes"] >= mes_ini) & (df_real["Mes"] <= mes_fim)]
     return _agrupar(sub, "Cod. Centro de Custo")
@@ -227,6 +231,7 @@ def _despesa_por_categoria_com_mes_corte(df_real: pd.DataFrame, mensal_nova: pd.
     return total
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def despesa_por_categoria_previsto(df_previsto: pd.DataFrame, df_real: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.Series | None:
     # REV02/REV03 têm fonte própria (arquivos de Despesa por departamento,
     # ver dados.py), só cobrindo a partir da janela de previsão real da
@@ -292,6 +297,7 @@ def _detalhar(df: pd.DataFrame, coluna_codigo: str, coluna_nome: str) -> pd.Data
     return agrupado[["Categoria", "Codigo", "Centro de Custo", "Valor"]]
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def receita_por_cc_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.DataFrame:
     sub = df_real[
         df_real["Nível 1"].isin(NIVEL_RECEITA_BRUTA) & (df_real["Mes"] >= mes_ini) & (df_real["Mes"] <= mes_fim)
@@ -299,6 +305,7 @@ def receita_por_cc_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.Data
     return _detalhar(sub, "Cod. Centro de Custo", "Centro de Custo")
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def despesa_por_cc_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.DataFrame:
     sub = df_real[
         df_real["Nível 1"].isin(NIVEL_DESPESA_ADM) & (df_real["Mes"] >= mes_ini) & (df_real["Mes"] <= mes_fim)
@@ -313,11 +320,13 @@ def despesa_por_cc_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.Data
     return detalhe
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def custo_por_cc_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.DataFrame:
     sub = df_real[df_real["Nível 1"].isin(NIVEL_CUSTO) & (df_real["Mes"] >= mes_ini) & (df_real["Mes"] <= mes_fim)]
     return _detalhar(sub, "Cod. Centro de Custo", "Centro de Custo")
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def imposto_por_cc_realizado(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.DataFrame:
     sub = df_real[df_real["Nível 1"].isin(NIVEL_IMPOSTO) & (df_real["Mes"] >= mes_ini) & (df_real["Mes"] <= mes_fim)]
     return _detalhar(sub, "Cod. Centro de Custo", "Centro de Custo")
@@ -396,6 +405,7 @@ def _despesa_por_cc_rev02(df_real: pd.DataFrame, mes_ini, mes_fim) -> pd.DataFra
     return agrupado[["Categoria", "Codigo", "Centro de Custo", "Valor"]]
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def despesa_por_cc_previsto(
     df_previsto: pd.DataFrame, df_real: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim
 ) -> pd.DataFrame | None:

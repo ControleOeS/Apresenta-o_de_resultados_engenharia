@@ -98,6 +98,7 @@ def _soma_nivel(df: pd.DataFrame, niveis: list[int]) -> float:
     return df.loc[df["Nível 1"].isin(niveis), "Valor"].sum()
 
 
+@st.cache_data(show_spinner=False)
 def calcular_dre(df: pd.DataFrame) -> dict:
     receita_bruta = _soma_nivel(df, NIVEL_RECEITA_BRUTA)
     imposto = _soma_nivel(df, NIVEL_IMPOSTO)
@@ -129,6 +130,7 @@ def calcular_dre(df: pd.DataFrame) -> dict:
     }
 
 
+@st.cache_data(show_spinner=False)
 def calcular_dre_por_mes(df: pd.DataFrame) -> pd.DataFrame:
     linhas = []
     for mes, grupo in df.groupby("Mes"):
@@ -318,6 +320,7 @@ def carregar_previsto() -> pd.DataFrame:
     return _ler_previsto(token, rev)
 
 
+@st.cache_data(show_spinner=False)
 def calcular_previsto(df: pd.DataFrame, cenario: str) -> dict:
     sub = df[df["Cenário"] == cenario]
 
@@ -431,14 +434,17 @@ def _por_cc_refinado(df_detalhado: pd.DataFrame, analises: list[str], revisao: s
     return -serie if negar else serie
 
 
+@st.cache_data(show_spinner=False)
 def receita_por_cc_refinado(df_detalhado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.Series:
     return _por_cc_refinado(df_detalhado, ANALISES_RECEITA_REFINADO, revisao, cenario, mes_ini, mes_fim, negar=False)
 
 
+@st.cache_data(show_spinner=False)
 def custo_por_cc_refinado(df_detalhado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.Series:
     return _por_cc_refinado(df_detalhado, LINHAS_CUSTO_REFINADO, revisao, cenario, mes_ini, mes_fim, negar=True)
 
 
+@st.cache_data(show_spinner=False)
 def imposto_por_cc_refinado(df_detalhado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.Series:
     return _por_cc_refinado(df_detalhado, ANALISES_IMPOSTO_REFINADO, revisao, cenario, mes_ini, mes_fim, negar=True)
 
@@ -499,6 +505,7 @@ def carregar_previsto_refinado() -> pd.DataFrame:
     return resultado
 
 
+@st.cache_data(show_spinner=False)
 def calcular_previsto_refinado(df_refinado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> dict | None:
     sub = df_refinado[
         (df_refinado["Revisão"] == revisao)
@@ -805,6 +812,7 @@ def revisao_vigente_no_mes(mes: int, revisoes_disponiveis: list[str]) -> str:
     return max(candidatas, key=lambda r: MESES_SUBSTITUIR_POR_REV.get(r, 0))
 
 
+@st.cache_data(show_spinner=False)
 def _despesa_mensal_com_fonte_nova(
     df_real: pd.DataFrame,
     df_previsto: pd.DataFrame,
@@ -897,6 +905,7 @@ def _receita_custo_mensal_com_mes_corte(
     return total if algum_mes_com_dado else None
 
 
+@st.cache_data(show_spinner=False)
 def calcular_previsto_com_fallback_despesa(
     df_previsto: pd.DataFrame,
     df_refinado: pd.DataFrame,
@@ -969,6 +978,7 @@ def calcular_previsto_com_fallback_despesa(
     return resultado, provisorio
 
 
+@st.cache_data(show_spinner=False)
 def previsto_mensal_ano(
     df_previsto: pd.DataFrame,
     df_refinado: pd.DataFrame,
