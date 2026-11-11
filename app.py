@@ -1056,8 +1056,8 @@ col_rec_acum.markdown(
 )
 receita_detalhe_real_mes = receita_por_cc_realizado(df_real, mes_ref, mes_ref)
 receita_detalhe_real_acum = receita_por_cc_realizado(df_real, mes_ini_ano, mes_ref)
-receita_detalhe_orc_mes = receita_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref)
-receita_detalhe_orc_acum = receita_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
+receita_detalhe_orc_mes = receita_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref)
+receita_detalhe_orc_acum = receita_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 
 with st.expander("Ver valores em tabela (Receita Bruta por Categoria)"):
     _render_categoria_com_drilldown(
@@ -1083,12 +1083,12 @@ def _combinar_detalhe(a, b):
 # da DRE (margem_bruta), não só Receita Bruta + Custo.
 custo_real_mes_cat = custo_por_categoria_realizado(df_real, mes_ref, mes_ref)
 custo_real_acum_cat = custo_por_categoria_realizado(df_real, mes_ini_ano, mes_ref)
-custo_orc_mes_cat = custo_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ref, mes_ref)
-custo_orc_acum_cat = custo_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
+custo_orc_mes_cat = custo_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
+custo_orc_acum_cat = custo_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 imposto_real_mes_cat = imposto_por_categoria_realizado(df_real, mes_ref, mes_ref)
 imposto_real_acum_cat = imposto_por_categoria_realizado(df_real, mes_ini_ano, mes_ref)
-imposto_orc_mes_cat = imposto_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ref, mes_ref)
-imposto_orc_acum_cat = imposto_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
+imposto_orc_mes_cat = imposto_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
+imposto_orc_acum_cat = imposto_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 
 lucro_real_mes_cat = receita_real_mes_cat.add(imposto_real_mes_cat, fill_value=0.0).add(custo_real_mes_cat, fill_value=0.0)
 lucro_real_acum_cat = receita_real_acum_cat.add(imposto_real_acum_cat, fill_value=0.0).add(custo_real_acum_cat, fill_value=0.0)
@@ -1143,16 +1143,16 @@ lucro_detalhe_real_acum = _combinar_detalhe(
 lucro_detalhe_orc_mes = _combinar_detalhe(
     _combinar_detalhe(
         receita_detalhe_orc_mes,
-        imposto_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref),
+        imposto_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref),
     ),
-    custo_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref),
+    custo_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref),
 )
 lucro_detalhe_orc_acum = _combinar_detalhe(
     _combinar_detalhe(
         receita_detalhe_orc_acum,
-        imposto_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref),
+        imposto_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref),
     ),
-    custo_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref),
+    custo_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref),
 )
 
 with st.expander("Ver valores em tabela (Lucro Bruto por Categoria)"):

@@ -4,13 +4,26 @@ classificação manual de Centro de Custo feita na página "Classificar
 Centros de Custo" — ver classificacoes.py."""
 
 import pandas as pd
+import streamlit as st
 
-from classificacoes import carregar_classificacoes
+from classificacoes import CLASSIFICACOES_FIXAS, carregar_categorias, carregar_classificacoes
+
+# TTL curto (não permanente) nas funções de categoria/CC abaixo — elas
+# dependem de carregar_classificacoes(), que não tem cache próprio de
+# propósito (se autoinvalida sozinha quando o Dropbox muda, sem TTL —
+# ver dropbox_io.py). Cachear essas funções aqui sem TTL esconderia uma
+# classificação recém-editada até o processo reiniciar; 60s mantém o
+# ganho de performance (item 32) sem perder a atualização quase em
+# tempo real que a migração para Dropbox (2026-10-21) foi feita pra ter.
+_TTL_CATEGORIA = 60
 from dados import (
     CATEGORIA_DESPESA_ADMINISTRATIVO,
     CATEGORIA_DESPESA_COMERCIAL,
     CATEGORIA_DESPESA_OPERACAO,
     CATEGORIA_DESPESA_PLR,
+    CODIGO_CUSTO,
+    CODIGO_IMPOSTO,
+    CODIGO_RECEITA_BRUTA,
     CODIGOS_DESPESA_ADM,
     NIVEL_CUSTO,
     NIVEL_DESPESA_ADM,
@@ -125,14 +138,70 @@ def _por_categoria_previsto(df_previsto: pd.DataFrame, codigos, revisao: str, ce
     return _agrupar(sub, "CC")
 
 
-# Receita/Custo/Imposto vêm do Refinado Engenharias (cobre as 4 Revisões —
-# REV00 a REV03 — com Centro de Custo), não do df_previsto "antigo" (só
-# tem REV00/REV01). Despesa continua no df_previsto: o Refinado não tem
-# Despesa Administrativa/Financeira por Centro de Custo (confirmado
-# inspecionando o arquivo em 2026-10-14) — REV02/REV03 ficam sem Despesa
-# por Categoria até essa fonte existir.
-def receita_por_categoria_previsto(df_refinado_detalhado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.Series | None:
-    serie = receita_por_cc_refinado(df_refinado_detalhado, revisao, cenario, mes_ini, mes_fim)
+def _por_cc_efetivo(
+    niveis_realizado: list[int],
+    codigo_previsto: int,
+    refinado_fn,
+    df_previsto: pd.DataFrame,
+    df_refinado_detalhado: pd.DataFrame,
+    df_real: pd.DataFrame,
+    revisao: str,
+    cenario: str,
+    mes_ini,
+    mes_fim,
+) -> pd.Series:
+    """Série "Orçado efetivo" por Código de Centro de Custo — mesma fonte e
+    regra de corte do DRE agregado (dados.calcular_previsto_com_fallback_
+    despesa), generalizada pra Receita Bruta/Custo/Imposto (item 2,
+    2026-11-11 — antes a quebra por categoria/CC usava sempre o Refinado
+    Engenharias, nunca espelhava o Realizado nem trocava de fonte, e por
+    isso divergia do DRE):
+
+    - REV00/REV01: vêm do arquivo dedicado (`df_previsto`, que tem Centro
+      de Custo) — o DRE já usa essa fonte pra essas Revisões (Causa 2: o
+      Refinado tem outro arquivo de origem, com números ligeiramente
+      diferentes).
+    - REV02/REV03: espelham o Realizado por CC nos meses anteriores à
+      janela real de previsão da Revisão (`mes_corte_revisao`) e usam o
+      Refinado Engenharias dali em diante — mesma regra já aplicada no
+      DRE (`_receita_custo_mensal_com_mes_corte`), agora também aqui
+      (Causa 1)."""
+    if revisao in ("REV00", "REV01"):
+        sub = df_previsto[
+            (df_previsto["Codigo"] == codigo_previsto)
+            & (df_previsto["Revisão"] == revisao)
+            & (df_previsto["Cenário"] == cenario)
+            & (df_previsto["Mes"] >= mes_ini)
+            & (df_previsto["Mes"] <= mes_fim)
+        ]
+        # dropna=False: lançamento sem CC entra no total (cai em "Não
+        # classificado" mais adiante) em vez de ser descartado pelo
+        # groupby e inflar a divergência com o DRE (mesmo padrão já
+        # corrigido no DASH_DIRETORIA — confirmado com dado real,
+        # 2026-11-11: resíduo de R$1.573 no acumulado REV02).
+        return sub.groupby("CC", dropna=False)["Valor"].sum()
+
+    mes_corte = mes_corte_revisao(revisao, pd.Timestamp(mes_fim).year)
+    total = pd.Series(dtype=float)
+    for mes in pd.date_range(mes_ini, mes_fim, freq="MS"):
+        if mes < mes_corte:
+            sub = df_real[df_real["Nível 1"].isin(niveis_realizado) & (df_real["Mes"] == mes)]
+            serie_mes = sub.groupby("Cod. Centro de Custo", dropna=False)["Valor"].sum()
+        else:
+            serie_mes = refinado_fn(df_refinado_detalhado, revisao, cenario, mes, mes)
+        total = total.add(serie_mes, fill_value=0.0)
+    return total
+
+
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
+def receita_por_categoria_previsto(
+    df_previsto: pd.DataFrame, df_refinado_detalhado: pd.DataFrame, df_real: pd.DataFrame,
+    revisao: str, cenario: str, mes_ini, mes_fim,
+) -> pd.Series | None:
+    serie = _por_cc_efetivo(
+        NIVEL_RECEITA_BRUTA, CODIGO_RECEITA_BRUTA, receita_por_cc_refinado,
+        df_previsto, df_refinado_detalhado, df_real, revisao, cenario, mes_ini, mes_fim,
+    )
     return _agrupar_serie(serie) if not serie.empty else None
 
 
@@ -173,13 +242,27 @@ def despesa_por_categoria_previsto(df_previsto: pd.DataFrame, df_real: pd.DataFr
     return _por_categoria_previsto(df_previsto, CODIGOS_DESPESA_ADM, revisao, cenario, mes_ini, mes_fim)
 
 
-def custo_por_categoria_previsto(df_refinado_detalhado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.Series | None:
-    serie = custo_por_cc_refinado(df_refinado_detalhado, revisao, cenario, mes_ini, mes_fim)
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
+def custo_por_categoria_previsto(
+    df_previsto: pd.DataFrame, df_refinado_detalhado: pd.DataFrame, df_real: pd.DataFrame,
+    revisao: str, cenario: str, mes_ini, mes_fim,
+) -> pd.Series | None:
+    serie = _por_cc_efetivo(
+        NIVEL_CUSTO, CODIGO_CUSTO, custo_por_cc_refinado,
+        df_previsto, df_refinado_detalhado, df_real, revisao, cenario, mes_ini, mes_fim,
+    )
     return _agrupar_serie(serie) if not serie.empty else None
 
 
-def imposto_por_categoria_previsto(df_refinado_detalhado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.Series | None:
-    serie = imposto_por_cc_refinado(df_refinado_detalhado, revisao, cenario, mes_ini, mes_fim)
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
+def imposto_por_categoria_previsto(
+    df_previsto: pd.DataFrame, df_refinado_detalhado: pd.DataFrame, df_real: pd.DataFrame,
+    revisao: str, cenario: str, mes_ini, mes_fim,
+) -> pd.Series | None:
+    serie = _por_cc_efetivo(
+        NIVEL_IMPOSTO, CODIGO_IMPOSTO, imposto_por_cc_refinado,
+        df_previsto, df_refinado_detalhado, df_real, revisao, cenario, mes_ini, mes_fim,
+    )
     return _agrupar_serie(serie) if not serie.empty else None
 
 
@@ -270,10 +353,15 @@ def _detalhar_serie(serie_cc: pd.Series, tabela_dimensao: pd.DataFrame) -> pd.Da
     return df[["Categoria", "Codigo", "Centro de Custo", "Valor"]]
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def receita_por_cc_previsto(
-    df_refinado_detalhado: pd.DataFrame, tabela_dimensao: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim
+    df_previsto: pd.DataFrame, df_refinado_detalhado: pd.DataFrame, df_real: pd.DataFrame, tabela_dimensao: pd.DataFrame,
+    revisao: str, cenario: str, mes_ini, mes_fim,
 ) -> pd.DataFrame | None:
-    serie = receita_por_cc_refinado(df_refinado_detalhado, revisao, cenario, mes_ini, mes_fim)
+    serie = _por_cc_efetivo(
+        NIVEL_RECEITA_BRUTA, CODIGO_RECEITA_BRUTA, receita_por_cc_refinado,
+        df_previsto, df_refinado_detalhado, df_real, revisao, cenario, mes_ini, mes_fim,
+    )
     return _detalhar_serie(serie, tabela_dimensao) if not serie.empty else None
 
 
@@ -322,15 +410,41 @@ def despesa_por_cc_previsto(
     return _por_cc_previsto(df_previsto, CODIGOS_DESPESA_ADM, revisao, cenario, mes_ini, mes_fim)
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def custo_por_cc_previsto(
-    df_refinado_detalhado: pd.DataFrame, tabela_dimensao: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim
+    df_previsto: pd.DataFrame, df_refinado_detalhado: pd.DataFrame, df_real: pd.DataFrame, tabela_dimensao: pd.DataFrame,
+    revisao: str, cenario: str, mes_ini, mes_fim,
 ) -> pd.DataFrame | None:
-    serie = custo_por_cc_refinado(df_refinado_detalhado, revisao, cenario, mes_ini, mes_fim)
+    serie = _por_cc_efetivo(
+        NIVEL_CUSTO, CODIGO_CUSTO, custo_por_cc_refinado,
+        df_previsto, df_refinado_detalhado, df_real, revisao, cenario, mes_ini, mes_fim,
+    )
     return _detalhar_serie(serie, tabela_dimensao) if not serie.empty else None
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
 def imposto_por_cc_previsto(
-    df_refinado_detalhado: pd.DataFrame, tabela_dimensao: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim
+    df_previsto: pd.DataFrame, df_refinado_detalhado: pd.DataFrame, df_real: pd.DataFrame, tabela_dimensao: pd.DataFrame,
+    revisao: str, cenario: str, mes_ini, mes_fim,
 ) -> pd.DataFrame | None:
-    serie = imposto_por_cc_refinado(df_refinado_detalhado, revisao, cenario, mes_ini, mes_fim)
+    serie = _por_cc_efetivo(
+        NIVEL_IMPOSTO, CODIGO_IMPOSTO, imposto_por_cc_refinado,
+        df_previsto, df_refinado_detalhado, df_real, revisao, cenario, mes_ini, mes_fim,
+    )
     return _detalhar_serie(serie, tabela_dimensao) if not serie.empty else None
+
+
+@st.cache_data(show_spinner=False, ttl=_TTL_CATEGORIA)
+def todas_categorias_conhecidas() -> list[str]:
+    """Lista canônica de categorias que podem aparecer em qualquer gráfico
+    "por Categoria" (Receita/Lucro Bruto/Despesa, Mês/Acumulado) — usada
+    pra fixar um mapa categoria -> cor único pro app inteiro (item 26/28,
+    2026-11-11), em vez de cada gráfico atribuir cor por posição no
+    próprio ranking (mesma categoria virava cor diferente entre o bloco
+    do Mês e o do Acumulado). Lista oficial (Gerenciar categorias) + as
+    fixas (ex.: Funil de Vendas) + as específicas de Despesa + "Não
+    classificado"."""
+    oficiais = set(carregar_categorias())
+    fixas = {info["categoria"] for info in CLASSIFICACOES_FIXAS.values() if info.get("categoria")}
+    despesa = {CATEGORIA_DESPESA_ADMINISTRATIVO, CATEGORIA_DESPESA_COMERCIAL, CATEGORIA_DESPESA_OPERACAO, CATEGORIA_DESPESA_PLR}
+    return sorted(oficiais | fixas | despesa | {NAO_CLASSIFICADO})
