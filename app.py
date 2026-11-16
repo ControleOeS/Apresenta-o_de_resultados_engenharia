@@ -16,7 +16,9 @@ from dados import (
     carregar_meta_mensal,
     carregar_refinado_detalhado,
     dre_2025_periodo,
+    last_update,
     MESES_SUBSTITUIR_POR_REV,
+    mes_corte_revisao,
     previsto_mensal_ano,
     revisao_vigente_no_mes,
     tabela_dimensao_centro_de_custo,
@@ -31,11 +33,11 @@ from estilo import (
     render_caixa_narrativa,
     render_tabela_com_faixa,
 )
-from formatting import format_brl_compacto, format_brl_md, format_pct, format_pct_av
+from formatting import format_brl_compacto, format_brl_md, format_pct, format_pct_av, format_pp
 from exportar_pdf import gerar_pdf, localizar_navegador, porta_do_servidor_atual
 from forecast import dados_forecast_salvo, fechar_dre_ano, meses_forecast, revisao_atual_forecast, validar_lucro_bruto
 from narrativa import gerar_analise
-from analise_complexos import AnaliseComplexos
+from analise_complexos import MESES_NOVO_MOBILIZADO, construir_analise_complexos
 from graficos_complexos import grafico_pizza_duas_fatias, grafico_pizza_status
 from analise_categoria import (
     custo_por_categoria_previsto,
@@ -54,11 +56,23 @@ from analise_categoria import (
     receita_por_categoria_realizado,
     receita_por_cc_previsto,
     receita_por_cc_realizado,
+    todas_categorias_conhecidas,
 )
-from graficos_categoria import grafico_categoria_empilhado
+from graficos_categoria import grafico_categoria_empilhado, mapa_cores_categorias
 from auth import mostrar_banner_ambiente, require_password
 
 st.set_page_config(page_title="Apresentação de Resultados", page_icon="📊", layout="wide")
+
+# Guarda os query params (?mes=...&revisao=...) em session_state ANTES do
+# gate de login — se reabrir um link assim cai na tela "Acesso Restrito" e,
+# pelo relato do usuário, os filtros voltam ao padrão depois de logar (item
+# 31, 2026-11-11). Fallback de leitura, não mexe na senha (st.secrets) nem
+# adiciona nenhuma persistência de sessão nova.
+if st.query_params.get("mes"):
+    st.session_state["_qp_mes"] = st.query_params.get("mes")
+if st.query_params.get("revisao"):
+    st.session_state["_qp_revisao"] = st.query_params.get("revisao")
+
 require_password()
 mostrar_banner_ambiente()
 
@@ -100,7 +114,7 @@ tabela_dimensao = tabela_dimensao_centro_de_custo()
 with st.sidebar:
     st.header("Filtros")
     meses_disponiveis = sorted(df_real["Mes"].dropna().unique().tolist())
-    mes_param = st.query_params.get("mes")
+    mes_param = st.query_params.get("mes") or st.session_state.get("_qp_mes")
     indice_mes_padrao = len(meses_disponiveis) - 1
     if mes_param:
         datas_iso = [d.strftime("%Y-%m-%d") for d in meses_disponiveis]
@@ -113,7 +127,7 @@ with st.sidebar:
         format_func=lambda d: f"{MESES_PT[d.month]}/{d.year}",
     )
     revisoes = sorted(set(df_previsto["Revisão"].unique().tolist()) | set(df_refinado["Revisão"].unique().tolist()))
-    revisao_param = st.query_params.get("revisao")
+    revisao_param = st.query_params.get("revisao") or st.session_state.get("_qp_revisao")
     # Abre já na Revisão que previa de verdade o mês padrão (último Realizado
     # fechado) — ex: fechado até Setembro -> REV02 (REV03 só previa de Out
     # em diante) — em vez de sempre a Revisão mais recente, pra abrir pronto
@@ -190,9 +204,14 @@ nome_mes = MESES_PT[mes_ref.month].upper()
 st.markdown(
     render_banner(
         "APRESENTAÇÃO DE RESULTADOS",
-        f"Superus Holding · Revisão {revisao_sel} · Cenário {cenario_sel}",
+        f"Superus Engenharia · Revisão {revisao_sel} · Cenário {cenario_sel}",
     ),
     unsafe_allow_html=True,
+)
+_ultimo_mes_real = df_real["Mes"].max()
+st.caption(
+    f"Dados atualizados em {last_update()} · último mês com Realizado fechado: "
+    f"{MESES_PT[_ultimo_mes_real.month]}/{_ultimo_mes_real.year}"
 )
 
 dre_mes_real = calcular_dre(df_real[df_real["Mes"] == mes_ref])
@@ -211,6 +230,20 @@ dre_acum_orc, despesa_provisoria_acum = calcular_previsto_com_fallback_despesa(
 dre_mes_orc = dre_mes_orc or {}
 dre_acum_orc = dre_acum_orc or {}
 despesa_provisoria = despesa_provisoria_mes or despesa_provisoria_acum
+
+# Aviso genérico quando o Mês de referência inteiro está fora da janela que
+# a Revisão escolhida realmente prevê (ex.: Jan/26+REV02, Set/26+REV03) — o
+# Orçado inteiro (não só Despesa) espelha o Realizado aí, Δ=0 em tudo. Antes
+# só existia um aviso específico de Despesa pra REV02/REV03 (abaixo) — esse
+# cobre o caso geral, pra qualquer Revisão (item 6, 2026-11-11).
+if mes_ref < mes_corte_revisao(revisao_sel, ano):
+    revisao_indicada = revisao_vigente_no_mes(mes_ref.month, revisoes)
+    janelas = {"REV00": "Jan-Mar", "REV01": "Abr-Jun", "REV02": "Jul-Set", "REV03": "Out-Dez"}
+    st.warning(
+        f"⚠️ A {revisao_sel} só prevê {janelas.get(revisao_sel, '?')}/{str(ano)[2:]}; para "
+        f"{MESES_PT[mes_ref.month]}/{str(ano)[2:]} o Orçado espelha o Realizado (Δ=0 em tudo). "
+        f"Revisão indicada para este mês: {revisao_indicada}."
+    )
 
 # ------------------------------------------------------------------
 # KPIs
@@ -239,9 +272,14 @@ def _grafico_kpi(nome: str, campo: str, campo_margem_base: str | None = None) ->
     menor = min(valores_validos) if valores_validos else 0
     # Folga proporcional ao alcance total do gráfico (não ao valor da própria
     # barra) — senão uma barra negativa minúscula perto de barras grandes
-    # ganha uma margem ínfima e o rótulo cola no eixo X.
-    alcance = maior - min(menor, 0) or abs(maior) or 1
-    y_topo = maior + alcance * 0.22
+    # ganha uma margem ínfima e o rótulo cola no eixo X. O eixo sempre
+    # inclui o zero dos dois lados (max(maior,0)/min(menor,0)) — antes só
+    # a base tinha essa blindagem; com as 4 barras negativas (item 3), o
+    # topo nunca chegava no zero (eixo "pendurado") e o alcance virava só
+    # a diferença entre as 4 barras (às vezes ~100 num valor de milhões),
+    # fazendo os ticks repetirem o mesmo texto arredondado.
+    alcance = max(maior, 0) - min(menor, 0) or abs(maior) or 1
+    y_topo = max(maior, 0) + alcance * 0.22
     y_base = min(menor, 0) - alcance * 0.18
 
     fig = go.Figure(
@@ -260,12 +298,21 @@ def _grafico_kpi(nome: str, campo: str, campo_margem_base: str | None = None) ->
     for var, x_real, x_orc in [(var_mes, "Mês Real.", "Mês Orç."), (var_acum, "Acum. Real.", "Acum. Orç.")]:
         if var is None:
             continue
-        cor_var = VERMELHO if var < 0 else "#1C7C3E"
+        # Seta já indica a direção — sinal "+"/"-" junto é redundante (item
+        # 17). Variação que arredonda pra 0,0% (ex.: Orçado espelhando
+        # Realizado fora da janela da Revisão, item 6) fica neutra, sem
+        # seta nem cor — "▲ +0.0%" verde era enganoso.
+        if round(var, 3) == 0:
+            cor_var = "#555555"
+            texto_var = "0,0%"
+        else:
+            cor_var = VERMELHO if var < 0 else "#1C7C3E"
+            texto_var = f"{'▲' if var >= 0 else '▼'} {abs(var) * 100:.1f}%".replace(".", ",")
         anotacoes.append(
             dict(
                 x=x_real,
                 y=y_topo,
-                text=f"{'▲' if var >= 0 else '▼'} {var * 100:+.1f}%",
+                text=texto_var,
                 showarrow=False,
                 font=dict(color=cor_var, size=13, weight=700),
             )
@@ -298,10 +345,10 @@ def _grafico_kpi(nome: str, campo: str, campo_margem_base: str | None = None) ->
     if campo_margem_base:
         base_mes_orc, base_mes_real = dre_mes_orc.get(campo_margem_base), dre_mes_real.get(campo_margem_base)
         base_acum_orc, base_acum_real = dre_acum_orc.get(campo_margem_base), dre_acum_real.get(campo_margem_base)
-        m1 = format_pct_av(dre_mes_orc.get(campo), base_mes_orc)
-        m2 = format_pct_av(dre_mes_real.get(campo), base_mes_real)
-        m3 = format_pct_av(dre_acum_orc.get(campo), base_acum_orc)
-        m4 = format_pct_av(dre_acum_real.get(campo), base_acum_real)
+        m1 = format_pct_av(dre_mes_orc.get(campo), base_mes_orc, manter_sinal=True)
+        m2 = format_pct_av(dre_mes_real.get(campo), base_mes_real, manter_sinal=True)
+        m3 = format_pct_av(dre_acum_orc.get(campo), base_acum_orc, manter_sinal=True)
+        m4 = format_pct_av(dre_acum_real.get(campo), base_acum_real, manter_sinal=True)
         legenda_margem = f"Margem — Mês Orç. {m1} · Mês Real. {m2} · Acum. Orç. {m3} · Acum. Real. {m4}"
 
     return fig, legenda_margem
@@ -355,7 +402,11 @@ TH_VALOR = f"padding:6px 6px; text-align:right; background-color:{VERDE_ESCURO};
 TH_DERIVADO = f"padding:6px 6px; text-align:right; background-color:{VERDE_DERIVADO_HEADER}; color:white; font-weight:700; white-space:nowrap;"
 TH_GRUPO_VALOR = f"text-align:center; padding:6px; background-color:{VERDE_ESCURO}; color:white; font-weight:700;"
 TH_GRUPO_DERIVADO = f"text-align:center; padding:6px; background-color:{VERDE_DERIVADO_HEADER}; color:white; font-weight:700;"
-TH_ROTULO = f"text-align:left; padding:6px 10px; background-color:{VERDE_ESCURO}; color:white;"
+# position:sticky + z-index: a 1a coluna (rótulo da linha) fica fixa na
+# rolagem horizontal das tabelas largas (DRE Acumulado/Forecast) — as
+# colunas mais importantes (Acumulado, Orçado, Real. x Orç.) ficavam
+# escondidas à direita até rolar (item 29, 2026-11-11).
+TH_ROTULO = f"text-align:left; padding:6px 10px; background-color:{VERDE_ESCURO}; color:white; position:sticky; left:0; z-index:2;"
 
 
 def _td(conteudo, extra="", classe="", rowspan=None) -> str:
@@ -368,15 +419,20 @@ def _td_valor(valor, extra="", classe="", rowspan=None) -> str:
     return _td(format_brl_md(valor), extra + cor, classe, rowspan=rowspan)
 
 
-def _celula_av(valor, base, disponivel=True, extra="", mostrar=True, rowspan=None) -> str:
+def _celula_av(valor, base, disponivel=True, extra="", mostrar=True, rowspan=None, destaque=False) -> str:
     # Receita Bruta e Impostos não mostram A.V.% — pedido do usuário,
     # 2026-10-21 (a base do A.V.% virou Receita Líquida, e essas duas linhas
     # viradas % dela soam estranhas: Receita Bruta > 100%, Imposto sempre
     # perto de -10%).
     if not mostrar:
         return _td("", f"background-color:{VERDE_DERIVADO_TINT};" + extra, rowspan=rowspan)
-    texto = format_pct_av(valor, base) if disponivel else "N/D"
-    return _td(texto, f"background-color:{VERDE_DERIVADO_TINT};" + extra, rowspan=rowspan)
+    texto = format_pct_av(valor, base, manter_sinal=destaque) if disponivel else "N/D"
+    # Linhas de resultado (destaque=True) carregam o sinal da margem — nesse
+    # caso, negativo também vira vermelho (igual ao valor em R$ da mesma
+    # linha); linhas de custo/despesa continuam só no verde padrão (sinal já
+    # vem do abs() de format_pct_av). Corrigido 2026-11-11 (item 1).
+    cor = f"color:{VERMELHO};" if destaque and disponivel and (valor or 0) < 0 else ""
+    return _td(texto, f"background-color:{VERDE_DERIVADO_TINT};{cor}" + extra, rowspan=rowspan)
 
 
 def _espacador_th() -> str:
@@ -411,18 +467,19 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
     real_mes = dre_mes_real[campo]
     orc_mes = dre_mes_orc.get(campo)
     real_2025_mes = dre_mes_2025.get(campo) if dre_mes_2025 else None
-    estilo_linha = "font-weight:700; background-color:#EAF2E0;" if destaque else "background-color:#FFFFFF;"
+    cor_fundo_linha = "#EAF2E0" if destaque else "#FFFFFF"
+    estilo_linha = f"font-weight:700; background-color:{cor_fundo_linha};" if destaque else f"background-color:{cor_fundo_linha};"
     mostrar_av = campo not in ("receita_bruta", "imposto")
     linhas_mes_html.append(
         f"<tr style='{estilo_linha}'>"
-        f"<td style='padding:6px 12px; white-space:nowrap;'>{nome}</td>"
+        f"<td style='padding:6px 12px; white-space:nowrap; position:sticky; left:0; z-index:1; background-color:{cor_fundo_linha};'>{nome}</td>"
         + _td_valor(real_mes)
-        + _celula_av(real_mes, base_av_mes, mostrar=mostrar_av)
+        + _celula_av(real_mes, base_av_mes, mostrar=mostrar_av, destaque=destaque)
         + _td_valor(orc_mes)
-        + _celula_av(orc_mes, base_av_orc_mes, disponivel=orc_mes is not None, mostrar=mostrar_av)
+        + _celula_av(orc_mes, base_av_orc_mes, disponivel=orc_mes is not None, mostrar=mostrar_av, destaque=destaque)
         + _celulas_delta(real_mes, orc_mes, destaque)
         + _td_valor(real_2025_mes)
-        + _celula_av(real_2025_mes, base_av_2025_mes, disponivel=real_2025_mes is not None, mostrar=mostrar_av)
+        + _celula_av(real_2025_mes, base_av_2025_mes, disponivel=real_2025_mes is not None, mostrar=mostrar_av, destaque=destaque)
         + _celulas_delta(real_mes, real_2025_mes, destaque)
         + "</tr>"
     )
@@ -445,12 +502,12 @@ tabela_mes_html = (
     f"<th colspan='2' style='{TH_GRUPO_VALOR}'>Realizado 2025</th>"
     f"<th colspan='2' style='{TH_GRUPO_DERIVADO}'>25x26</th>"
     "</tr>"
-    f"<tr><th style='{TH_ROTULO}'>DRE - Engenharia</th>"
+    f"<tr><th style='{TH_ROTULO}'>DRE - Superus Engenharia</th>"
     f"<th style='{TH_VALOR}'>{nome_mes}/{ano}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
     f"<th style='{TH_VALOR}'>{nome_mes}/{ano}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
-    f"<th style='{TH_DERIVADO}'>▲</th><th style='{TH_DERIVADO}'>A.H.%</th>"
+    f"<th style='{TH_DERIVADO}'>Δ</th><th style='{TH_DERIVADO}'>A.H.%</th>"
     f"<th style='{TH_VALOR}'>{nome_mes}/{str(ano - 1)[2:]}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
-    f"<th style='{TH_DERIVADO}'>▲</th><th style='{TH_DERIVADO}'>A.H.%</th>"
+    f"<th style='{TH_DERIVADO}'>Δ</th><th style='{TH_DERIVADO}'>A.H.%</th>"
     "</tr>"
     + "".join(linhas_mes_html)
     + "</table>"
@@ -470,7 +527,8 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
     real_acum = dre_acum_real[campo]
     orc_acum = dre_acum_orc.get(campo)
     real_2025_acum = dre_acum_2025.get(campo) if dre_acum_2025 else None
-    estilo_linha = "font-weight:700; background-color:#EAF2E0;" if destaque else "background-color:#FFFFFF;"
+    cor_fundo_linha = "#EAF2E0" if destaque else "#FFFFFF"
+    estilo_linha = f"font-weight:700; background-color:{cor_fundo_linha};" if destaque else f"background-color:{cor_fundo_linha};"
     mostrar_av = campo not in ("receita_bruta", "imposto")
     eh_margem = campo in LINHAS_MARGEM
     # Linhas de Margem (Lucro Bruto/EBITDA/LAIR) ganham uma 2ª linha logo
@@ -483,27 +541,31 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
     celulas_meses = "".join(_td_valor(dre_por_mes[m][campo], classe="col-mes-detalhe") for m in meses_do_ano)
     linhas_acum_html.append(
         f"<tr style='{estilo_linha}'>"
-        f"<td style='padding:6px 12px; white-space:nowrap;'>{nome}</td>"
+        f"<td style='padding:6px 12px; white-space:nowrap; position:sticky; left:0; z-index:1; background-color:{cor_fundo_linha};'>{nome}</td>"
         + celulas_meses
         + _espacador_td()
         + _td_valor(real_acum, rowspan=rs)
-        + _celula_av(real_acum, base_av_acum, mostrar=mostrar_av, rowspan=rs)
+        + _celula_av(real_acum, base_av_acum, mostrar=mostrar_av, rowspan=rs, destaque=destaque)
         + _td_valor(orc_acum, rowspan=rs)
-        + _celula_av(orc_acum, base_av_orc_acum, disponivel=orc_acum is not None, mostrar=mostrar_av, rowspan=rs)
+        + _celula_av(orc_acum, base_av_orc_acum, disponivel=orc_acum is not None, mostrar=mostrar_av, rowspan=rs, destaque=destaque)
         + _celulas_delta(real_acum, orc_acum, destaque, rowspan=rs)
         + _td_valor(real_2025_acum, rowspan=rs)
-        + _celula_av(real_2025_acum, base_av_2025_acum, disponivel=real_2025_acum is not None, mostrar=mostrar_av, rowspan=rs)
+        + _celula_av(real_2025_acum, base_av_2025_acum, disponivel=real_2025_acum is not None, mostrar=mostrar_av, rowspan=rs, destaque=destaque)
         + _celulas_delta(real_acum, real_2025_acum, destaque, rowspan=rs)
         + "</tr>"
     )
     if eh_margem:
         celulas_margem_meses = "".join(
-            _td(format_pct_av(dre_por_mes[m][campo], dre_por_mes[m].get("receita_liquida")), classe="col-mes-detalhe")
+            _td(
+                format_pct_av(dre_por_mes[m][campo], dre_por_mes[m].get("receita_liquida"), manter_sinal=True),
+                extra=f"color:{VERMELHO};" if dre_por_mes[m][campo] < 0 else "",
+                classe="col-mes-detalhe",
+            )
             for m in meses_do_ano
         )
         linhas_acum_html.append(
             "<tr style='font-style:italic; color:#555; background-color:#F7F9F4;'>"
-            f"<td style='padding:4px 12px 4px 24px;'>{LINHAS_MARGEM[campo]}</td>"
+            f"<td style='padding:4px 12px 4px 24px; position:sticky; left:0; z-index:1; background-color:#F7F9F4;'>{LINHAS_MARGEM[campo]}</td>"
             + celulas_margem_meses
             + _espacador_td()
             + "</tr>"
@@ -524,14 +586,14 @@ tabela_acum_html = (
     f"<th colspan='2' style='{TH_GRUPO_VALOR}'>Acumulado 2025</th>"
     f"<th colspan='2' style='{TH_GRUPO_DERIVADO}'>25x26</th>"
     "</tr>"
-    f"<tr><th style='{TH_ROTULO}'>DRE - Engenharia</th>"
+    f"<tr><th style='{TH_ROTULO}'>DRE - Superus Engenharia</th>"
     + cabecalho_meses
     + _espacador_th()
     + f"<th style='{TH_VALOR}'>{ano}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
     + f"<th style='{TH_VALOR}'>{ano}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
-    + f"<th style='{TH_DERIVADO}'>▲</th><th style='{TH_DERIVADO}'>A.H.%</th>"
+    + f"<th style='{TH_DERIVADO}'>Δ</th><th style='{TH_DERIVADO}'>A.H.%</th>"
     + f"<th style='{TH_VALOR}'>{ano - 1}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
-    + f"<th style='{TH_DERIVADO}'>▲</th><th style='{TH_DERIVADO}'>A.H.%</th>"
+    + f"<th style='{TH_DERIVADO}'>Δ</th><th style='{TH_DERIVADO}'>A.H.%</th>"
     "</tr>"
     + "".join(linhas_acum_html)
     + "</table>"
@@ -585,10 +647,11 @@ st.divider()
 # ------------------------------------------------------------------
 st.header("Curva S — Orçado x Realizado Acumulado")
 st.caption(
-    "Acumulado mês a mês ao longo do ano inteiro (independe do Mês de referência "
-    "filtrado na barra lateral) — Realizado comparado ao Orçado efetivo de cada "
-    "Cenário (Moderado e Otimista) na Revisão selecionada, para a linha do DRE "
-    "escolhida abaixo."
+    "Acumulado mês a mês ao longo do ano inteiro — o Orçado mostra o ano inteiro "
+    "independente do Mês de referência filtrado na barra lateral (Realizado "
+    "comparado ao Orçado efetivo de cada Cenário, Moderado e Otimista, na Revisão "
+    "selecionada); o Realizado é cortado nesse Mês de referência (ver nota abaixo), "
+    "para a linha do DRE escolhida abaixo."
 )
 
 col_curva_s_linha, col_curva_s_base = st.columns([2, 1])
@@ -616,6 +679,55 @@ else:
 
 COR_ORCADO_MODERADO = "#00465C"  # ponta esquerda do GRADIENTE_BANNER — distingue do verde do Otimista
 
+# Linhas de dedução (convenção de sinal negativo) que o usuário prefere ver
+# subindo (valor absoluto) na Curva S — mais fácil comparar magnitude entre
+# Realizado/Orçado do que com a curva descendo. Sinal original preservado
+# só no tooltip (via customdata). Confirmado pelo usuário, 2026-11-11 (item
+# 12) — lista literal pedida, não generalizada pra outras linhas de
+# dedução (ex.: Imposto de Renda fica como estava, sinal original plotado).
+CAMPOS_CURVA_S_ABSOLUTO = {"custo", "imposto", "despesa_adm", "despesa_financeira"}
+
+
+def _ticks_bonitos(valor_min: float, valor_max: float, n: int = 5) -> list[float]:
+    """Posições de tick "redondas" e igualmente espaçadas (algoritmo clássico
+    de "nice numbers" — degrau arredondado pra 1/2/5×10^k), igual ao que o
+    tickformat automático do Plotly faria — mas aqui calculado à mão porque
+    precisamos interceptar o texto de cada tick (format_brl_compacto em vez
+    do sufixo em inglês do Plotly, item 13)."""
+    import math
+
+    if valor_max == valor_min:
+        return [valor_min]
+    alcance_bruto = (valor_max - valor_min) / max(n - 1, 1)
+    magnitude = 10 ** math.floor(math.log10(abs(alcance_bruto)))
+    passo_normalizado = alcance_bruto / magnitude
+    if passo_normalizado < 1.5:
+        passo = magnitude
+    elif passo_normalizado < 3:
+        passo = 2 * magnitude
+    elif passo_normalizado < 7:
+        passo = 5 * magnitude
+    else:
+        passo = 10 * magnitude
+    primeiro = math.floor(valor_min / passo) * passo
+    ultimo = math.ceil(valor_max / passo) * passo
+    n_ticks = int(round((ultimo - primeiro) / passo)) + 1
+    return [primeiro + i * passo for i in range(n_ticks)]
+
+
+def _ticktext_compacta(valores) -> list[str]:
+    """Rótulo de eixo na mesma função de formatação dos rótulos de dado
+    (format_brl_compacto) — "Mi"/"mil" em vez do tickformat nativo do
+    Plotly (",.2s", que produz "50M" em inglês); "0" em vez de "0,0" no
+    zero (item 13, 2026-11-11)."""
+    textos = []
+    for v in valores:
+        if v == 0:
+            textos.append("0")
+        else:
+            textos.append(format_brl_compacto(v))
+    return textos
+
 
 def _grafico_curva_s(
     df_real_mensal: pd.DataFrame,
@@ -628,18 +740,25 @@ def _grafico_curva_s(
 ) -> tuple[go.Figure, list[str]]:
     meses_ano_cs = list(pd.date_range(f"{ano_cs}-01-01", f"{ano_cs}-12-01", freq="MS"))
     fig = go.Figure()
-    hover = "%{x|%b/%Y}<br>%{fullData.name}: R$ %{y:,.2f}<extra></extra>"
+    em_valor_absoluto = campo in CAMPOS_CURVA_S_ABSOLUTO
+    # Com sinal original preservado via customdata, o hover mostra o valor
+    # de verdade mesmo quando a curva plota o módulo (item 12).
+    hover = "%{x|%b/%Y}<br>%{fullData.name}: R$ %{customdata:,.2f}<extra></extra>"
     avisos: list[str] = []
+    todos_os_valores: list[float] = []
 
     if not df_real_mensal.empty and campo in df_real_mensal.columns:
         serie_real = df_real_mensal.set_index("Mes")[campo].reindex(meses_ano_cs)
         acumulado_real = serie_real.cumsum().dropna()
         if not acumulado_real.empty:
+            valores_plotados = acumulado_real.abs().values if em_valor_absoluto else acumulado_real.values
+            todos_os_valores.extend(valores_plotados)
             fig.add_trace(
                 go.Scatter(
                     x=acumulado_real.index,
-                    y=acumulado_real.values,
-                    mode="lines",
+                    y=valores_plotados,
+                    customdata=acumulado_real.values,
+                    mode="lines+markers",
                     name=nome_real,
                     line=dict(color=VERDE_ESCURO, width=4),
                     hovertemplate=hover,
@@ -658,11 +777,14 @@ def _grafico_curva_s(
             avisos.append(f"{nome_serie}: N/D para \"{nome_linha}\" em pelo menos um mês do ano — curva não exibida.")
             continue
         acumulado_orc = serie_orc.cumsum()
+        valores_plotados = acumulado_orc.abs().values if em_valor_absoluto else acumulado_orc.values
+        todos_os_valores.extend(valores_plotados)
         fig.add_trace(
             go.Scatter(
                 x=acumulado_orc.index,
-                y=acumulado_orc.values,
-                mode="lines",
+                y=valores_plotados,
+                customdata=acumulado_orc.values,
+                mode="lines+markers",
                 name=nome_serie,
                 line=dict(color=cor, width=2, dash=tracejado),
                 hovertemplate=hover,
@@ -671,7 +793,6 @@ def _grafico_curva_s(
 
     fig.update_layout(
         separators=",.",
-        yaxis_tickformat=",.2s",
         plot_bgcolor="#FFFFFF",
         paper_bgcolor="#FFFFFF",
         height=420,
@@ -679,8 +800,23 @@ def _grafico_curva_s(
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
         margin=dict(t=30, b=10, l=70, r=10),
     )
-    fig.update_xaxes(tickformat="%b/%Y", showgrid=False)
-    fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor="#CCCCCC")
+    # Eixo X: os 12 meses em pt-BR (item 11) — tickformat nativo do Plotly
+    # usa locale em inglês e escolhe o passo automaticamente (de 2 em 2
+    # meses quando não cabem os 12).
+    fig.update_xaxes(
+        tickvals=meses_ano_cs,
+        ticktext=[f"{MESES_PT[m.month]}/{str(m.year)[2:]}" for m in meses_ano_cs],
+        showgrid=False,
+    )
+    if todos_os_valores:
+        y_ticks = _ticks_bonitos(min(0, min(todos_os_valores)), max(0, max(todos_os_valores)))
+        fig.update_yaxes(
+            tickvals=y_ticks,
+            ticktext=_ticktext_compacta(y_ticks),
+            zeroline=True, zerolinewidth=2, zerolinecolor="#CCCCCC",
+        )
+    else:
+        fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor="#CCCCCC")
     return fig, avisos
 
 
@@ -778,33 +914,43 @@ else:
 
         linhas_forecast_html = []
         for nome, campo, destaque in LINHAS_DRE_DEF:
-            estilo_linha = "font-weight:700; background-color:#EAF2E0;" if destaque else "background-color:#FFFFFF;"
+            cor_fundo_linha = "#EAF2E0" if destaque else "#FFFFFF"
+            estilo_linha = f"font-weight:700; background-color:{cor_fundo_linha};" if destaque else f"background-color:{cor_fundo_linha};"
             celulas = "".join(_td_valor_fc(dre_forecast_por_mes[m][campo]) for m in dre_forecast_por_mes)
             celula_total = _td_valor_fc(dre_forecast_total_ano[campo])
             celula_meta = _td_valor_fc(meta_total_ano_app[campo])
             celula_delta = _td_valor_fc(dre_forecast_total_ano[campo] - meta_total_ano_app[campo])
             linhas_forecast_html.append(
-                f"<tr style='{estilo_linha}'><td style='padding:6px 10px; white-space:nowrap;'>{nome}</td>"
+                f"<tr style='{estilo_linha}'><td style='padding:6px 10px; white-space:nowrap; position:sticky; left:0; z-index:1; background-color:{cor_fundo_linha};'>{nome}</td>"
                 f"{celulas}{celula_total}{_espacador_td()}{celula_meta}{celula_delta}</tr>"
             )
             if campo in LINHAS_MARGEM:
                 celulas_pct = "".join(
-                    _td_fc(format_pct_av(dre_forecast_por_mes[m][campo], dre_forecast_por_mes[m]["receita_liquida"]))
+                    _td_fc(
+                        format_pct_av(dre_forecast_por_mes[m][campo], dre_forecast_por_mes[m]["receita_liquida"], manter_sinal=True),
+                        f"color:{VERMELHO};" if dre_forecast_por_mes[m][campo] < 0 else "",
+                    )
                     for m in dre_forecast_por_mes
                 )
-                celula_pct_total = _td_fc(format_pct_av(dre_forecast_total_ano[campo], base_av_forecast_ano))
+                celula_pct_total = _td_fc(
+                    format_pct_av(dre_forecast_total_ano[campo], base_av_forecast_ano, manter_sinal=True),
+                    f"color:{VERMELHO};" if dre_forecast_total_ano[campo] < 0 else "",
+                )
                 pct_meta = (
                     meta_total_ano_app[campo] / meta_total_ano_app["receita_liquida"]
                     if meta_total_ano_app["receita_liquida"]
                     else None
                 )
                 pct_forecast = dre_forecast_total_ano[campo] / base_av_forecast_ano if base_av_forecast_ano else None
-                celula_pct_meta = _td_fc(format_pct_av(meta_total_ano_app[campo], meta_total_ano_app["receita_liquida"]))
+                celula_pct_meta = _td_fc(
+                    format_pct_av(meta_total_ano_app[campo], meta_total_ano_app["receita_liquida"], manter_sinal=True),
+                    f"color:{VERMELHO};" if meta_total_ano_app[campo] < 0 else "",
+                )
                 delta_pp = None if pct_meta is None or pct_forecast is None else pct_forecast - pct_meta
-                celula_pct_delta = _td_fc(format_pct(delta_pp))
+                celula_pct_delta = _td_fc(format_pp(delta_pp))
                 linhas_forecast_html.append(
                     "<tr style='font-style:italic; color:#555; background-color:#F7F9F4;'>"
-                    f"<td style='padding:4px 10px 4px 20px;'>{LINHAS_MARGEM[campo]}</td>"
+                    f"<td style='padding:4px 10px 4px 20px; position:sticky; left:0; z-index:1; background-color:#F7F9F4;'>{LINHAS_MARGEM[campo]}</td>"
                     f"{celulas_pct}{celula_pct_total}{_espacador_td()}{celula_pct_meta}{celula_pct_delta}</tr>"
                 )
 
@@ -813,7 +959,7 @@ else:
         )
         tabela_forecast_html = (
             "<table style='width:100%; border-collapse:collapse; font-size:0.8rem; color:#1a1a1a;'>"
-            f"<tr><th style='{TH_ROTULO}'>DRE - Engenharia</th>{cabecalho_forecast}<th style='{TH_VALOR_FC}'>Total {ano}</th>"
+            f"<tr><th style='{TH_ROTULO}'>DRE - Superus Engenharia</th>{cabecalho_forecast}<th style='{TH_VALOR_FC}'>Total {ano}</th>"
             f"{_espacador_th()}<th style='{TH_META}'>Meta Otimista</th><th style='{TH_DELTA}'>Δ Forecast-Meta</th></tr>"
             + "".join(linhas_forecast_html)
             + "</table>"
@@ -840,16 +986,15 @@ st.markdown("<div class='quebra-pagina'></div>", unsafe_allow_html=True)
 st.header("Receita e Despesa por Categoria")
 st.caption(
     "Quebra por categoria de Centro de Custo, a partir da classificação feita em "
-    "\"Classificar Centros de Custo\". Categorias usadas numa categoria mas que "
-    "cobrem um Centro de Custo ainda sem classificação aparecem como "
-    "\"Não classificado\"."
+    "\"Classificar Centros de Custo\". Centros de Custo ainda sem classificação "
+    "aparecem como \"Não classificado\"."
 )
 
 
 receita_real_mes_cat = receita_por_categoria_realizado(df_real, mes_ref, mes_ref)
 receita_real_acum_cat = receita_por_categoria_realizado(df_real, mes_ini_ano, mes_ref)
-receita_orc_mes_cat = receita_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ref, mes_ref)
-receita_orc_acum_cat = receita_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
+receita_orc_mes_cat = receita_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
+receita_orc_acum_cat = receita_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 
 def _config_colunas_com_textuais(colunas_numericas: list[str], colunas_textuais: set[str]) -> dict:
     # format="localized" usa o idioma do NAVEGADOR de quem acessa (não do
@@ -869,7 +1014,13 @@ def _config_colunas_com_textuais(colunas_numericas: list[str], colunas_textuais:
         if nome in colunas_textuais:
             config[nome] = st.column_config.TextColumn(nome)
         else:
-            config[nome] = st.column_config.NumberColumn(nome, format="localized")
+            # step=1 força exibição inteira (sem casas decimais) mantendo o
+            # separador localizado — não afeta o valor numérico de verdade
+            # usado pra ordenar (doc do NumberColumn: "step... ensures a
+            # consistent number of digits after the decimal"). Sem isso,
+            # valores apareciam com 0 a 3 casas decimais soltas (item 14,
+            # 2026-11-11).
+            config[nome] = st.column_config.NumberColumn(nome, format="localized", step=1)
     return config
 
 
@@ -1018,17 +1169,23 @@ def _render_categoria_com_drilldown(
             )
 
 
+
+# Cor fixa por categoria (item 26) — calculada uma vez com a lista
+# canônica inteira, reaproveitada nos 3 blocos (Receita/Lucro Bruto/
+# Despesa) × (Mês/Acumulado), não recalculada por gráfico.
+mapa_cores_cat = mapa_cores_categorias(todas_categorias_conhecidas())
+
 st.subheader("Receita Bruta por Categoria (em R$)")
 col_rec_mes, col_rec_acum = st.columns(2)
 col_rec_mes.plotly_chart(
     grafico_categoria_empilhado(
-        f"Receita Bruta (R$/Mil) — {nome_mes}/{ano}", receita_orc_mes_cat, receita_real_mes_cat, format_brl_compacto
+        f"Receita Bruta (em R$) — {nome_mes}/{ano}", receita_orc_mes_cat, receita_real_mes_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
 col_rec_acum.plotly_chart(
     grafico_categoria_empilhado(
-        f"Receita Bruta (R$/Mil) — Acumulado {ano}", receita_orc_acum_cat, receita_real_acum_cat, format_brl_compacto
+        f"Receita Bruta (em R$) — Acumulado {ano}", receita_orc_acum_cat, receita_real_acum_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
@@ -1047,7 +1204,7 @@ col_rec_acum.markdown(
     render_caixa_narrativa(
         "ANÁLISE DE ACUMULADO",
         gerar_analise(
-            "Receita Bruta Acumulada", f"Acumulado {ano}",
+            "Receita Bruta", f"Acumulado {ano}",
             dre_acum_real["receita_bruta"], dre_acum_orc.get("receita_bruta"),
             receita_real_acum_cat, receita_orc_acum_cat, favoravel_se_maior=True,
         ),
@@ -1056,8 +1213,8 @@ col_rec_acum.markdown(
 )
 receita_detalhe_real_mes = receita_por_cc_realizado(df_real, mes_ref, mes_ref)
 receita_detalhe_real_acum = receita_por_cc_realizado(df_real, mes_ini_ano, mes_ref)
-receita_detalhe_orc_mes = receita_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref)
-receita_detalhe_orc_acum = receita_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
+receita_detalhe_orc_mes = receita_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref)
+receita_detalhe_orc_acum = receita_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 
 with st.expander("Ver valores em tabela (Receita Bruta por Categoria)"):
     _render_categoria_com_drilldown(
@@ -1083,12 +1240,12 @@ def _combinar_detalhe(a, b):
 # da DRE (margem_bruta), não só Receita Bruta + Custo.
 custo_real_mes_cat = custo_por_categoria_realizado(df_real, mes_ref, mes_ref)
 custo_real_acum_cat = custo_por_categoria_realizado(df_real, mes_ini_ano, mes_ref)
-custo_orc_mes_cat = custo_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ref, mes_ref)
-custo_orc_acum_cat = custo_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
+custo_orc_mes_cat = custo_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
+custo_orc_acum_cat = custo_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 imposto_real_mes_cat = imposto_por_categoria_realizado(df_real, mes_ref, mes_ref)
 imposto_real_acum_cat = imposto_por_categoria_realizado(df_real, mes_ini_ano, mes_ref)
-imposto_orc_mes_cat = imposto_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ref, mes_ref)
-imposto_orc_acum_cat = imposto_por_categoria_previsto(df_refinado_detalhado, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
+imposto_orc_mes_cat = imposto_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
+imposto_orc_acum_cat = imposto_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 
 lucro_real_mes_cat = receita_real_mes_cat.add(imposto_real_mes_cat, fill_value=0.0).add(custo_real_mes_cat, fill_value=0.0)
 lucro_real_acum_cat = receita_real_acum_cat.add(imposto_real_acum_cat, fill_value=0.0).add(custo_real_acum_cat, fill_value=0.0)
@@ -1099,13 +1256,13 @@ st.subheader("Lucro Bruto por Categoria (em R$)")
 col_lb_mes, col_lb_acum = st.columns(2)
 col_lb_mes.plotly_chart(
     grafico_categoria_empilhado(
-        f"Lucro Bruto (R$/Mil) — {nome_mes}/{ano}", lucro_orc_mes_cat, lucro_real_mes_cat, format_brl_compacto
+        f"Lucro Bruto (em R$) — {nome_mes}/{ano}", lucro_orc_mes_cat, lucro_real_mes_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
 col_lb_acum.plotly_chart(
     grafico_categoria_empilhado(
-        f"Lucro Bruto (R$/Mil) — Acumulado {ano}", lucro_orc_acum_cat, lucro_real_acum_cat, format_brl_compacto
+        f"Lucro Bruto (em R$) — Acumulado {ano}", lucro_orc_acum_cat, lucro_real_acum_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
@@ -1124,7 +1281,7 @@ col_lb_acum.markdown(
     render_caixa_narrativa(
         "ANÁLISE DE ACUMULADO",
         gerar_analise(
-            "Lucro Bruto Acumulado", f"Acumulado {ano}",
+            "Lucro Bruto", f"Acumulado {ano}",
             lucro_real_acum_cat.sum(), lucro_orc_acum_cat.sum() if lucro_orc_acum_cat is not None else None,
             lucro_real_acum_cat, lucro_orc_acum_cat, favoravel_se_maior=True,
         ),
@@ -1143,16 +1300,16 @@ lucro_detalhe_real_acum = _combinar_detalhe(
 lucro_detalhe_orc_mes = _combinar_detalhe(
     _combinar_detalhe(
         receita_detalhe_orc_mes,
-        imposto_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref),
+        imposto_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref),
     ),
-    custo_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref),
+    custo_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref),
 )
 lucro_detalhe_orc_acum = _combinar_detalhe(
     _combinar_detalhe(
         receita_detalhe_orc_acum,
-        imposto_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref),
+        imposto_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref),
     ),
-    custo_por_cc_previsto(df_refinado_detalhado, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref),
+    custo_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref),
 )
 
 with st.expander("Ver valores em tabela (Lucro Bruto por Categoria)"):
@@ -1172,17 +1329,17 @@ if despesa_orc_mes_cat is not None:
 if despesa_orc_acum_cat is not None:
     despesa_orc_acum_cat = -despesa_orc_acum_cat
 
-st.subheader("Despesa Administrativa por Categoria (em R$)")
+st.subheader("Despesa Total por Categoria (em R$)")
 col_desp_mes, col_desp_acum = st.columns(2)
 col_desp_mes.plotly_chart(
     grafico_categoria_empilhado(
-        f"Despesa Total (R$/Mil) — {nome_mes}/{ano}", despesa_orc_mes_cat, despesa_real_mes_cat, format_brl_compacto
+        f"Despesa Total (em R$) — {nome_mes}/{ano}", despesa_orc_mes_cat, despesa_real_mes_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
 col_desp_acum.plotly_chart(
     grafico_categoria_empilhado(
-        f"Despesa Total (R$/Mil) — Acumulado {ano}", despesa_orc_acum_cat, despesa_real_acum_cat, format_brl_compacto
+        f"Despesa Total (em R$) — Acumulado {ano}", despesa_orc_acum_cat, despesa_real_acum_cat, format_brl_compacto, mapa_cores_cat
     ),
     use_container_width=True,
 )
@@ -1207,7 +1364,7 @@ col_desp_acum.markdown(
     render_caixa_narrativa(
         "ANÁLISE DE ACUMULADO",
         gerar_analise(
-            "Despesa Administrativa Acumulada", f"Acumulado {ano}",
+            "Despesa Administrativa", f"Acumulado {ano}",
             -dre_acum_real["despesa_adm"],
             -despesa_orc_acum_total if despesa_orc_acum_total is not None else None,
             despesa_real_acum_cat, despesa_orc_acum_cat, favoravel_se_maior=False,
@@ -1240,11 +1397,28 @@ with st.expander("Ver valores em tabela (Despesa Total por Categoria)"):
 st.markdown("<div class='quebra-pagina'></div>", unsafe_allow_html=True)
 st.header("Análise de Complexos")
 
-analise_cpx = AnaliseComplexos(
+analise_cpx = construir_analise_complexos(
     df_real, df_refinado_detalhado, tabela_dimensao, mes_ref, mes_ini_ano, revisao_sel, cenario_sel
 )
 status_cpx = analise_cpx.status_todos()
 st.caption(f"Cobre todo Centro de Custo que já apareceu em Receita Bruta (Realizado ou Orçado) — {len(status_cpx)} ao todo.")
+if analise_cpx.janela_sem_historico():
+    st.info(
+        f"ℹ️ Nos primeiros {MESES_NOVO_MOBILIZADO} meses em que esta base tem dado (a partir de Jan/2026), "
+        "todo complexo ativo aparece como \"Novo Mobilizado\" — não existe histórico de 2025 por Centro de "
+        "Custo nesta base (só uma DRE 2025 já agregada, sem essa granularidade) pra distinguir de \"Ativo\"."
+    )
+
+# "Complexos Totais" não varia entre o bloco do Mês e o do Acumulado (vem
+# de status_cpx, calculado uma vez só acima) — mostrado uma única vez,
+# fora de _render_complexos_periodo (antes se repetia idêntico nos dois
+# blocos, item 4, 2026-11-11).
+from collections import Counter
+
+st.plotly_chart(
+    grafico_pizza_status(f"Complexos Totais: {len(status_cpx)}", Counter(status_cpx.values())),
+    use_container_width=True,
+)
 
 
 def _lista_nomeada(ccs) -> str:
@@ -1265,38 +1439,39 @@ def _render_complexos_periodo(badge: str, serie_receita_real, serie_receita_orc,
     lucro_avaliaveis = [c for c in operando if c in serie_lucro_orc.index]
     lucro_abaixo = [c for c in lucro_avaliaveis if c not in lucro_acima]
 
-    from collections import Counter
-
-    col1, col2 = st.columns(2)
+    # Título = soma das fatias DAQUELA pizza (não mais len(operando) fixo
+    # pras 3 — item 4, 2026-11-11). Quando a pizza cobre só um subconjunto
+    # de `operando` (nem todo complexo ativo tem orçado comparável nesse
+    # recorte), um subtítulo explica quantos ficaram de fora.
+    col1, col2, col3 = st.columns(3)
     col1.plotly_chart(
-        grafico_pizza_status(f"Complexos Totais {badge} -> {len(operando)}", Counter(status_cpx.values())),
-        use_container_width=True,
-    )
-    col2.plotly_chart(
         grafico_pizza_duas_fatias(
-            f"Receita Bruta — {badge} -> {len(operando)}",
+            f"Receita Bruta — {badge}: {len(receita_avaliaveis)}",
             "Receita Bruta Acima do Previsto", len(receita_acima),
             "Receita Bruta Abaixo do Previsto", len(receita_abaixo),
         ),
         use_container_width=True,
     )
-    col3, col4 = st.columns(2)
-    col3.plotly_chart(
+    if len(receita_avaliaveis) < len(operando):
+        col1.caption(f"{len(receita_avaliaveis)} de {len(operando)} complexos ativos — {len(operando) - len(receita_avaliaveis)} sem orçamento de Receita Bruta no período.")
+    col2.plotly_chart(
         grafico_pizza_duas_fatias(
-            f"Lucro Bruto Realizado — {badge} -> {len(operando)}",
+            f"Lucro Bruto Realizado — {badge}: {len(operando)}",
             "Lucro Bruto Realizado Positivo", len(lucro_positivo),
             "Lucro Bruto Realizado Negativo", len(lucro_negativo),
         ),
         use_container_width=True,
     )
-    col4.plotly_chart(
+    col3.plotly_chart(
         grafico_pizza_duas_fatias(
-            f"Lucro Bruto x Orçado — {badge} -> {len(operando)}",
+            f"Lucro Bruto x Orçado — {badge}: {len(lucro_avaliaveis)}",
             "Lucro Bruto Acima do Previsto", len(lucro_acima),
             "Lucro Bruto Abaixo do Previsto", len(lucro_abaixo),
         ),
         use_container_width=True,
     )
+    if len(lucro_avaliaveis) < len(operando):
+        col3.caption(f"{len(lucro_avaliaveis)} de {len(operando)} complexos ativos — {len(operando) - len(lucro_avaliaveis)} sem orçamento de Lucro Bruto no período.")
     st.markdown(
         f"- **Lucro Bruto Realizado Negativo** ({len(lucro_negativo)}): {_lista_nomeada(lucro_negativo)}.\n"
         f"- **Lucro Bruto Acima do Previsto** ({len(lucro_acima)}): {_lista_nomeada(lucro_acima)}."

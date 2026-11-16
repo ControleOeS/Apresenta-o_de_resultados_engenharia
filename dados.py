@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 import pandas as pd
@@ -16,7 +17,9 @@ from config import (
     DROPBOX_REFINADO_ENGENHARIAS,
     DROPBOX_RESULTADO_2025,
 )
-from dropbox_io import download, token_e_rev, token_e_revs
+from dropbox_io import download, get_metadata, token_e_rev, token_e_revs
+
+FUSO_BRASIL = timezone(timedelta(hours=-3))  # Brasília, sem horário de verão desde 2019
 
 # Cod. Centro de Custo que começa com SIN/REG seguido de um número != 01
 # (ex: SIN02.25020, REG05.17189) é a mesma obra/projeto do SIN01/REG01
@@ -95,6 +98,7 @@ def _soma_nivel(df: pd.DataFrame, niveis: list[int]) -> float:
     return df.loc[df["Nível 1"].isin(niveis), "Valor"].sum()
 
 
+@st.cache_data(show_spinner=False)
 def calcular_dre(df: pd.DataFrame) -> dict:
     receita_bruta = _soma_nivel(df, NIVEL_RECEITA_BRUTA)
     imposto = _soma_nivel(df, NIVEL_IMPOSTO)
@@ -117,6 +121,8 @@ def calcular_dre(df: pd.DataFrame) -> dict:
         "margem_bruta": margem_bruta,
         "despesa_adm": despesa_adm,
         "ebitda": ebitda,
+        "outros": outros,
+        "ebit": ebit,
         "despesa_financeira": despesa_financeira,
         "lair": lair,
         "imposto_renda": imposto_renda,
@@ -124,6 +130,7 @@ def calcular_dre(df: pd.DataFrame) -> dict:
     }
 
 
+@st.cache_data(show_spinner=False)
 def calcular_dre_por_mes(df: pd.DataFrame) -> pd.DataFrame:
     linhas = []
     for mes, grupo in df.groupby("Mes"):
@@ -152,6 +159,21 @@ def carregar_realizado() -> pd.DataFrame:
 def carregar_realizado_superus() -> pd.DataFrame:
     df = carregar_realizado()
     return df[df["Coligada"].isin(COLIGADAS_SUPERUS)]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def last_update_dt() -> datetime:
+    """Momento (UTC, aware) da última gravação do arquivo de Realizado no
+    Dropbox — cacheado por 60s (item 33, 2026-11-11), mesmo padrão do
+    DASH_DIRETORIA."""
+    token, _ = token_e_rev(DROPBOX_REALIZADO)
+    meta = get_metadata(token, DROPBOX_REALIZADO)
+    return datetime.strptime(meta["server_modified"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def last_update() -> str:
+    dt_local = last_update_dt().astimezone(FUSO_BRASIL)
+    return dt_local.strftime("%d/%m/%Y %H:%M")
 
 
 @st.cache_data(show_spinner="Lendo Realizado 2025 do Dropbox...")
@@ -298,6 +320,7 @@ def carregar_previsto() -> pd.DataFrame:
     return _ler_previsto(token, rev)
 
 
+@st.cache_data(show_spinner=False)
 def calcular_previsto(df: pd.DataFrame, cenario: str) -> dict:
     sub = df[df["Cenário"] == cenario]
 
@@ -411,47 +434,30 @@ def _por_cc_refinado(df_detalhado: pd.DataFrame, analises: list[str], revisao: s
     return -serie if negar else serie
 
 
+@st.cache_data(show_spinner=False)
 def receita_por_cc_refinado(df_detalhado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.Series:
     return _por_cc_refinado(df_detalhado, ANALISES_RECEITA_REFINADO, revisao, cenario, mes_ini, mes_fim, negar=False)
 
 
+@st.cache_data(show_spinner=False)
 def custo_por_cc_refinado(df_detalhado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.Series:
     return _por_cc_refinado(df_detalhado, LINHAS_CUSTO_REFINADO, revisao, cenario, mes_ini, mes_fim, negar=True)
 
 
+@st.cache_data(show_spinner=False)
 def imposto_por_cc_refinado(df_detalhado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> pd.Series:
     return _por_cc_refinado(df_detalhado, ANALISES_IMPOSTO_REFINADO, revisao, cenario, mes_ini, mes_fim, negar=True)
 
 
-@st.cache_data(show_spinner="Lendo tabela dimensão de Centro de Custo...")
-def _ler_tabela_dimensao(_token: str, cache_key: str) -> pd.DataFrame:
-    content = _baixar_refinado_bytes(_token, cache_key)
-    df = pd.read_excel(BytesIO(content), sheet_name="Tabelas dimensão", engine="calamine", header=0)
-    sub = df[["Cod. Centro de Custo", "Centro de Custo"]].copy()
-    sub.columns = ["Codigo", "Centro de Custo"]
-    sub = sub.dropna(subset=["Codigo"])
-    sub["Codigo"] = sub["Codigo"].astype(str).map(normalizar_codigo_cc)
-    # "FUNIL DE VENDAS" é um código-bucket (placeholder de pipeline, usado
-    # por dezenas de Complexos diferentes em "Dados Refinado" — não um
-    # Centro de Custo de verdade) — nessa aba ele aparece casado com um
-    # nome de projeto qualquer ("HYDRO ALUNORTE ACESSO E ISOLAMENTO PA",
-    # conferido em 2026-10-23), provavelmente só coincidência de posição na
-    # planilha de origem. Emprestar esse nome inflava um projeto específico
-    # com a receita de TODO o funil (ficava bilhões em vez de milhões) e
-    # ainda caía em "Não classificado". Removendo aqui, a busca de nome cai
-    # no fallback (mostra "FUNIL DE VENDAS" mesmo) em vez de herdar um nome
-    # errado.
-    sub = sub[sub["Codigo"] != "FUNIL DE VENDAS"]
-    return sub.drop_duplicates(subset="Codigo", keep="first").reset_index(drop=True)
-
-
 def tabela_dimensao_centro_de_custo() -> pd.DataFrame:
-    """Código <-> Nome de Centro de Custo, extraído da aba 'Tabelas
-    dimensão' do Refinado Engenharias — fonte canônica de nome pra
-    qualquer CC (Análise de Complexos etc.), já que nem Realizado nem
-    Previsto cobrem sozinhos todo Centro de Custo conhecido."""
-    token, rev = token_e_rev(DROPBOX_REFINADO_ENGENHARIAS)
-    return _ler_tabela_dimensao(token, rev)
+    """Código <-> Nome de Centro de Custo. Desativada em 2026-11-16: a aba
+    'Tabelas dimensão' do Refinado Engenharias teve sua estrutura alterada
+    na origem (perdeu as colunas 'Cod. Centro de Custo'/'Centro de Custo')
+    e ainda não está pronta pra ser usada aqui. Retorna vazia até a planilha
+    ser reestruturada — quem consome isso (Análise de Complexos, Classificar
+    Centros de Custo) já tem fallback pro nome visto no Realizado/Refinado,
+    ou pro próprio código, quando não encontra nada aqui."""
+    return pd.DataFrame(columns=["Codigo", "Centro de Custo"])
 
 
 @st.cache_data(show_spinner="Calculando Refinado Engenharias agregado...")
@@ -479,6 +485,7 @@ def carregar_previsto_refinado() -> pd.DataFrame:
     return resultado
 
 
+@st.cache_data(show_spinner=False)
 def calcular_previsto_refinado(df_refinado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim) -> dict | None:
     sub = df_refinado[
         (df_refinado["Revisão"] == revisao)
@@ -785,6 +792,7 @@ def revisao_vigente_no_mes(mes: int, revisoes_disponiveis: list[str]) -> str:
     return max(candidatas, key=lambda r: MESES_SUBSTITUIR_POR_REV.get(r, 0))
 
 
+@st.cache_data(show_spinner=False)
 def _despesa_mensal_com_fonte_nova(
     df_real: pd.DataFrame,
     df_previsto: pd.DataFrame,
@@ -804,13 +812,20 @@ def _despesa_mensal_com_fonte_nova(
     `despesa_financeira_mensal_nova` quando informada (REV03, fonte
     própria no ONEPAGE_REV03.xlsx); senão (REV02, ainda sem fonte própria)
     segue emprestada da REV01. Imposto de Renda segue 100% emprestado da
-    REV01 pras duas, sem fonte própria ainda."""
+    REV01 pras duas, sem fonte própria ainda.
+
+    "Outros Itens não Operacionais" também espelha o Realizado nos meses
+    antes do corte (igual aos outros campos aqui) — nos meses dentro da
+    janela de previsão real, fica 0 (a Revisão não tem fonte própria pra
+    isso). Sem isso, o LAIR do período acumulado não batia com o Realizado
+    mesmo quando TODOS os meses estavam espelhando (ex.: Set/26+REV03,
+    resíduo de R$600 — confirmado pelo usuário, 2026-11-11, item 6)."""
     mes_corte = mes_corte_revisao(revisao, pd.Timestamp(mes_fim).year)
 
     financeira_rev01 = _serie_mensal_previsto(df_previsto, "REV01", cenario, CODIGO_DESPESA_FINANCEIRA)
     ir_rev01 = _serie_mensal_previsto(df_previsto, "REV01", cenario, CODIGO_IMPOSTO_RENDA)
 
-    despesa_adm = despesa_financeira = imposto_renda = 0.0
+    despesa_adm = despesa_financeira = imposto_renda = outros = 0.0
     algum_mes_provisorio = False
     for mes in pd.date_range(mes_ini, mes_fim, freq="MS"):
         if mes < mes_corte:
@@ -818,6 +833,7 @@ def _despesa_mensal_com_fonte_nova(
             despesa_adm += dre_mes["despesa_adm"]
             despesa_financeira += dre_mes["despesa_financeira"]
             imposto_renda += dre_mes["imposto_renda"]
+            outros += dre_mes["outros"]
             continue
         despesa_adm += despesa_adm_mensal_nova.get(mes, 0.0)
         if despesa_financeira_mensal_nova is not None:
@@ -831,10 +847,12 @@ def _despesa_mensal_com_fonte_nova(
         "despesa_adm": despesa_adm,
         "despesa_financeira": despesa_financeira,
         "imposto_renda": imposto_renda,
+        "outros": outros,
         "provisorio": algum_mes_provisorio,
     }
 
 
+@st.cache_data(show_spinner=False)
 def _receita_custo_mensal_com_mes_corte(
     df_real: pd.DataFrame, df_refinado: pd.DataFrame, revisao: str, cenario: str, mes_ini, mes_fim
 ) -> dict | None:
@@ -867,6 +885,7 @@ def _receita_custo_mensal_com_mes_corte(
     return total if algum_mes_com_dado else None
 
 
+@st.cache_data(show_spinner=False)
 def calcular_previsto_com_fallback_despesa(
     df_previsto: pd.DataFrame,
     df_refinado: pd.DataFrame,
@@ -922,10 +941,12 @@ def calcular_previsto_com_fallback_despesa(
     resultado["ebitda"] = (
         base["margem_bruta"] + resultado["despesa_adm"] if resultado["despesa_adm"] is not None else None
     )
+    resultado["outros"] = despesa.get("outros") or 0.0
+    resultado["ebit"] = resultado["ebitda"] + resultado["outros"] if resultado["ebitda"] is not None else None
     resultado["despesa_financeira"] = despesa.get("despesa_financeira")
     resultado["lair"] = (
-        resultado["ebitda"] + resultado["despesa_financeira"]
-        if resultado["ebitda"] is not None and resultado["despesa_financeira"] is not None
+        resultado["ebit"] + resultado["despesa_financeira"]
+        if resultado["ebit"] is not None and resultado["despesa_financeira"] is not None
         else None
     )
     resultado["imposto_renda"] = despesa.get("imposto_renda")
@@ -937,6 +958,7 @@ def calcular_previsto_com_fallback_despesa(
     return resultado, provisorio
 
 
+@st.cache_data(show_spinner=False)
 def previsto_mensal_ano(
     df_previsto: pd.DataFrame,
     df_refinado: pd.DataFrame,

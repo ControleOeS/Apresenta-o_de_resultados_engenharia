@@ -36,6 +36,21 @@ def _cores_categoria(n: int) -> list[str]:
     return [_cor_em(i / (n - 1)) for i in range(n)]
 
 
+_COR_DEMAIS = "#9E9E9E"  # cinza neutro — nunca usado na rampa principal, não colide
+
+
+def mapa_cores_categorias(categorias_conhecidas: list[str]) -> dict[str, str]:
+    """Categoria -> cor FIXA, numa ordem estável (alfabética, a mesma lista
+    pra qualquer gráfico) — antes a cor seguia a posição no ranking de
+    valor de CADA gráfico, então a mesma categoria virava cor diferente
+    entre o bloco do Mês e o do Acumulado (item 26, 2026-11-11). Passe a
+    MESMA lista completa (analise_categoria.todas_categorias_conhecidas())
+    em todo gráfico, não só as categorias que aparecem naquele recorte."""
+    ordenadas = sorted(categorias_conhecidas)
+    cores = _cores_categoria(len(ordenadas)) if ordenadas else []
+    return dict(zip(ordenadas, cores))
+
+
 def _cor_texto_legivel(cor_hex: str) -> str:
     """Branco em fundo escuro, texto escuro em fundo claro — luminância
     relativa simples. Evita o problema de rótulo branco sumindo nas fatias
@@ -52,20 +67,37 @@ def _cor_texto_legivel(cor_hex: str) -> str:
 _LIMIAR_ROTULO = 0.07
 
 
-def grafico_categoria_empilhado(titulo: str, serie_orc, serie_real, formatar) -> go.Figure:
+# Fatia com participação (em módulo, em qualquer uma das barras) abaixo
+# disso entra em "Demais" — até 13 categorias em tons próximos da mesma
+# rampa ficavam indistinguíveis e sem rótulo; o detalhe completo continua
+# na tabela/expander de cada categoria (item 28, 2026-11-11). Esse
+# agrupamento é só visual — não muda nenhuma série usada fora do gráfico.
+_LIMIAR_AGRUPAR_DEMAIS = 0.02
+
+
+def grafico_categoria_empilhado(titulo: str, serie_orc, serie_real, formatar, mapa_cores: dict[str, str]) -> go.Figure:
     """serie_orc pode ser None (ex: Orçado indisponível pra essa Revisão) —
     nesse caso só a barra Realizado aparece. Categorias podem ser negativas
     (ex: Lucro Bruto por Categoria, onde uma categoria pode dar prejuízo) —
     o eixo e os rótulos são calculados pra lidar com isso (empilhamento
-    positivo pra cima, negativo pra baixo, igual o Plotly já faz nativo)."""
+    positivo pra cima, negativo pra baixo, igual o Plotly já faz nativo).
+
+    `mapa_cores` (categoria -> cor) é fixo pro app inteiro (ver
+    mapa_cores_categorias) — a mesma categoria sempre sai com a mesma cor,
+    não importa o que mais apareça nesse recorte específico (item 26)."""
     tem_orc = serie_orc is not None
-    categorias = sorted(
+    categorias_brutas = sorted(
         set(serie_orc.index if tem_orc else []) | set(serie_real.index),
         key=lambda c: -(
             (serie_real.get(c, 0) or 0) + (serie_orc.get(c, 0) if tem_orc else 0)
         ),
     )
-    cores = _cores_categoria(len(categorias)) if categorias else []
+    # Categoria sem valor em NENHUMA coluna (Realizado/Orçado, Mês/Acum. já
+    # filtrados por quem chama) não aparece — só polui a legenda (item 27).
+    categorias = [
+        c for c in categorias_brutas
+        if (serie_real.get(c, 0) or 0) != 0 or (tem_orc and (serie_orc.get(c, 0) or 0) != 0)
+    ]
     rotulos_x = (["Orçado", "Realizado"] if tem_orc else ["Realizado"])
 
     # Por barra: total assinado (pra caixa do total) e a soma em módulo das
@@ -84,9 +116,24 @@ def grafico_categoria_empilhado(titulo: str, serie_orc, serie_real, formatar) ->
         totais.append(sum(valores_bar))
         totais_abs.append(sum(abs(v) for v in valores_bar) or 1)
 
+    # Agrupa em "Demais" quem não chega no limiar de participação em
+    # NENHUMA das barras (item 28) — puramente visual, a tabela/expander
+    # de cada categoria continua mostrando o detalhe completo.
+    mapa_valores = {cat: [valores_bar[idx] for valores_bar in valores_por_barra] for idx, cat in enumerate(categorias)}
+    participacao_maxima = {
+        cat: max(abs(v) / total_abs for v, total_abs in zip(mapa_valores[cat], totais_abs))
+        for cat in categorias
+    }
+    categorias_principais = [c for c in categorias if participacao_maxima[c] >= _LIMIAR_AGRUPAR_DEMAIS]
+    categorias_pequenas = [c for c in categorias if participacao_maxima[c] < _LIMIAR_AGRUPAR_DEMAIS]
+    if categorias_pequenas:
+        mapa_valores["Demais"] = [sum(mapa_valores[c][b] for c in categorias_pequenas) for b in range(len(rotulos_x))]
+    categorias_render = categorias_principais + (["Demais"] if categorias_pequenas else [])
+
     fig = go.Figure()
-    for idx_cat, (cat, cor) in enumerate(zip(categorias, cores)):
-        valores = [valores_bar[idx_cat] for valores_bar in valores_por_barra]
+    for cat in categorias_render:
+        cor = _COR_DEMAIS if cat == "Demais" else mapa_cores.get(cat, _cor_em(0.5))
+        valores = mapa_valores[cat]
         textos = [
             formatar(v) if v and abs(v) / total_abs >= _LIMIAR_ROTULO else ""
             for v, total_abs in zip(valores, totais_abs)

@@ -6,17 +6,32 @@ vez de "por computador". Chave sempre o código do Centro de Custo (estável
 entre Realizado e Previsto) — o nome descritivo só é guardado junto para
 exibição/busca."""
 
+import streamlit as st
+
 from config import DROPBOX_CATEGORIAS, DROPBOX_CLASSIFICACOES
 from dados import normalizar_codigo_cc
 from dropbox_io import baixar_json, salvar_json
 
+# TTL curto (não permanente) — comprovado por profiling (2026-11-11, item
+# 32): carregar_classificacoes() é chamada dezenas de vezes numa única
+# troca de filtro (uma vez por categoria calculada), e cada chamada sem
+# cache fazia uma ida de verdade ao Dropbox (~1,4s cada, ~42s só nisso
+# numa troca de filtro pra um mês novo) — baixar_json() já cacheia o
+# CONTEÚDO por rev, mas ainda assim checa a rev (1 chamada de rede) a cada
+# invocação. TTL (não cache permanente) continua refletindo uma
+# classificação recém-editada em até 60s, sem recriar o problema que a
+# migração pro Dropbox (2026-10-21) resolveu.
+_TTL_CLASSIFICACOES = 60
 
+
+@st.cache_data(show_spinner=False, ttl=_TTL_CLASSIFICACOES)
 def carregar_categorias() -> list[str]:
     return baixar_json(DROPBOX_CATEGORIAS, [])
 
 
 def salvar_categorias(categorias: list[str]) -> None:
     salvar_json(DROPBOX_CATEGORIAS, sorted(set(categorias)))
+    carregar_categorias.clear()  # senão a própria página ficava até 60s sem ver o que acabou de salvar
 
 
 def adicionar_categoria(nova: str) -> list[str]:
@@ -55,6 +70,13 @@ def remover_categoria(categoria: str) -> list[str]:
 # analise_categoria.py), pra ficar igual entre Previsto e Realizado.
 CLASSIFICACOES_FIXAS: dict[str, dict[str, str]] = {
     "AJUSTE": {"nome": "AJUSTE", "categoria": "Backlog Ativo"},
+    # Mapeamento automático confirmado pelo usuário (2026-11-11, item 5): é
+    # um código-bucket do Funil de Vendas (não tem nome de projeto real —
+    # ver comentário de _ler_tabela_dimensao em dados.py), aparecia como
+    # "Não classificado" nos gráficos da página principal mesmo nunca indo
+    # aparecer na página "Classificar Centros de Custo" (ela só lista
+    # códigos de Realizado/Previsto "antigo", não os do Refinado).
+    "FUNIL DE VENDAS": {"nome": "FUNIL DE VENDAS", "categoria": "Funil de Vendas"},
     "JURIDICO": {"nome": "JURIDICO", "categoria": "Não operacional"},
     "PLR": {"nome": "PLR GESTORES", "categoria": "PLR"},
     "SEM RATEIO": {"nome": "SEM RATEIO", "categoria": "Outros"},
@@ -67,6 +89,7 @@ CLASSIFICACOES_FIXAS: dict[str, dict[str, str]] = {
 }
 
 
+@st.cache_data(show_spinner=False, ttl=_TTL_CLASSIFICACOES)
 def carregar_classificacoes() -> dict[str, dict[str, str]]:
     """Retorna {codigo_cc: {"nome": ..., "categoria": ...}}.
 
@@ -83,6 +106,7 @@ def salvar_classificacoes(mapa: dict[str, dict[str, str]]) -> None:
     mapa = dict(mapa)
     mapa.update(CLASSIFICACOES_FIXAS)
     salvar_json(DROPBOX_CLASSIFICACOES, mapa)
+    carregar_classificacoes.clear()  # senão a própria página ficava até 60s sem ver o que acabou de salvar
 
 
 def categoria_por_codigo_cc(mapa: dict[str, dict[str, str]]) -> dict[str, str]:

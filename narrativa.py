@@ -10,6 +10,27 @@ from formatting import format_brl_compacto, format_brl_md
 
 N_OFENSORES = 3
 
+# Artigo por indicador (item 20, 2026-11-11) — "A Lucro Bruto..." lia
+# errado (Lucro Bruto é masculino). Fallback "A" preserva o texto de
+# qualquer nome_metrica ainda não listado aqui (era o comportamento de
+# antes, fixo em "A", pra todos).
+GENERO_METRICA = {
+    "Receita Bruta": "A",
+    "Lucro Bruto": "O",
+    "Despesa Administrativa": "A",
+    "Despesa Total": "A",
+}
+
+
+def _juntar_itens(itens: list[str]) -> str:
+    """"A, B e C" (vírgula entre todos, "e" só antes do último) — antes
+    era sempre " e " entre todos, mesmo com 3+ itens ("A e B e C")."""
+    if not itens:
+        return ""
+    if len(itens) == 1:
+        return itens[0]
+    return ", ".join(itens[:-1]) + " e " + itens[-1]
+
 
 def _fmt_pct_abs(valor: float) -> str:
     return f"{abs(valor) * 100:.1f}%".replace(".", ",")
@@ -58,9 +79,10 @@ def gerar_analise(
 ) -> str:
     """favoravel_se_maior=True (Receita): real > orçado é bom.
     favoravel_se_maior=False (Despesa): real > orçado é ruim (gastou mais)."""
+    artigo = GENERO_METRICA.get(nome_metrica, "A")
     if not orc_total:
         return (
-            f"A <b>{nome_metrica} de {periodo_label}</b> totalizou {format_brl_md(real_total)}. "
+            f"{artigo} <b>{nome_metrica} de {periodo_label}</b> totalizou {format_brl_md(real_total)}. "
             "Orçado não disponível pra essa Revisão/Cenário — sem como calcular o desvio."
         )
 
@@ -76,10 +98,10 @@ def gerar_analise(
 
     partes = []
     if desfavoraveis:
-        partes.append("Ofensores: " + " e ".join(_item(*t) for t in desfavoraveis))
+        partes.append("Ofensores: " + _juntar_itens([_item(*t) for t in desfavoraveis]))
     if favoraveis:
         conectivo = "compensados por" if desfavoraveis else "Impulsionado por"
-        partes.append(f"{conectivo} " + " e ".join(_item(*t) for t in favoraveis))
+        partes.append(f"{conectivo} " + _juntar_itens([_item(*t) for t in favoraveis]))
     frase_extra = (" " + "; ".join(partes) + ".") if partes else ""
 
     # format_brl_md já envolve negativo em parênteses sozinho — não duplicar
@@ -87,7 +109,7 @@ def gerar_analise(
     delta_texto = format_brl_md(delta_total)
     delta_texto = delta_texto if delta_texto.startswith("(") else f"({delta_texto})"
     return (
-        f"A <b>{nome_metrica} de {periodo_label}</b> totalizou {format_brl_md(real_total)}, "
+        f"{artigo} <b>{nome_metrica} de {periodo_label}</b> totalizou {format_brl_md(real_total)}, "
         f"encerrando <b>{_fmt_pct_abs(delta_total / abs(orc_total))} {direcao} do orçamento</b> "
         f"{delta_texto} de {format_brl_md(orc_total)}.{frase_extra}"
     )
