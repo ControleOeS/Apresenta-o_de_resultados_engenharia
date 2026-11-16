@@ -449,35 +449,15 @@ def imposto_por_cc_refinado(df_detalhado: pd.DataFrame, revisao: str, cenario: s
     return _por_cc_refinado(df_detalhado, ANALISES_IMPOSTO_REFINADO, revisao, cenario, mes_ini, mes_fim, negar=True)
 
 
-@st.cache_data(show_spinner="Lendo tabela dimensão de Centro de Custo...")
-def _ler_tabela_dimensao(_token: str, cache_key: str) -> pd.DataFrame:
-    content = _baixar_refinado_bytes(_token, cache_key)
-    df = pd.read_excel(BytesIO(content), sheet_name="Tabelas dimensão", engine="calamine", header=0)
-    sub = df[["Cod. Centro de Custo", "Centro de Custo"]].copy()
-    sub.columns = ["Codigo", "Centro de Custo"]
-    sub = sub.dropna(subset=["Codigo"])
-    sub["Codigo"] = sub["Codigo"].astype(str).map(normalizar_codigo_cc)
-    # "FUNIL DE VENDAS" é um código-bucket (placeholder de pipeline, usado
-    # por dezenas de Complexos diferentes em "Dados Refinado" — não um
-    # Centro de Custo de verdade) — nessa aba ele aparece casado com um
-    # nome de projeto qualquer ("HYDRO ALUNORTE ACESSO E ISOLAMENTO PA",
-    # conferido em 2026-10-23), provavelmente só coincidência de posição na
-    # planilha de origem. Emprestar esse nome inflava um projeto específico
-    # com a receita de TODO o funil (ficava bilhões em vez de milhões) e
-    # ainda caía em "Não classificado". Removendo aqui, a busca de nome cai
-    # no fallback (mostra "FUNIL DE VENDAS" mesmo) em vez de herdar um nome
-    # errado.
-    sub = sub[sub["Codigo"] != "FUNIL DE VENDAS"]
-    return sub.drop_duplicates(subset="Codigo", keep="first").reset_index(drop=True)
-
-
 def tabela_dimensao_centro_de_custo() -> pd.DataFrame:
-    """Código <-> Nome de Centro de Custo, extraído da aba 'Tabelas
-    dimensão' do Refinado Engenharias — fonte canônica de nome pra
-    qualquer CC (Análise de Complexos etc.), já que nem Realizado nem
-    Previsto cobrem sozinhos todo Centro de Custo conhecido."""
-    token, rev = token_e_rev(DROPBOX_REFINADO_ENGENHARIAS)
-    return _ler_tabela_dimensao(token, rev)
+    """Código <-> Nome de Centro de Custo. Desativada em 2026-11-16: a aba
+    'Tabelas dimensão' do Refinado Engenharias teve sua estrutura alterada
+    na origem (perdeu as colunas 'Cod. Centro de Custo'/'Centro de Custo')
+    e ainda não está pronta pra ser usada aqui. Retorna vazia até a planilha
+    ser reestruturada — quem consome isso (Análise de Complexos, Classificar
+    Centros de Custo) já tem fallback pro nome visto no Realizado/Refinado,
+    ou pro próprio código, quando não encontra nada aqui."""
+    return pd.DataFrame(columns=["Codigo", "Centro de Custo"])
 
 
 @st.cache_data(show_spinner="Calculando Refinado Engenharias agregado...")
