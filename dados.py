@@ -803,7 +803,7 @@ def _despesa_mensal_com_fonte_nova(
     despesa_adm_mensal_nova: pd.Series,
     despesa_financeira_mensal_nova: pd.Series | None = None,
 ) -> dict:
-    """Despesa Administrativa/Financeira/IR, mês a mês: meses anteriores à
+    """Despesa Administrativa/Financeira, mês a mês: meses anteriores à
     janela de previsão da Revisão (MESES_SUBSTITUIR_POR_REV) espelham o
     próprio Realizado (a revisão não tinha orçado pra eles — já tinham
     acontecido); meses dentro da janela usam `despesa_adm_mensal_nova` pra
@@ -811,8 +811,13 @@ def _despesa_mensal_com_fonte_nova(
     aí que queremos ver o Real x Orç. de verdade). Despesa Financeira usa
     `despesa_financeira_mensal_nova` quando informada (REV03, fonte
     própria no ONEPAGE_REV03.xlsx); senão (REV02, ainda sem fonte própria)
-    segue emprestada da REV01. Imposto de Renda segue 100% emprestado da
-    REV01 pras duas, sem fonte própria ainda.
+    segue emprestada da REV01.
+
+    Imposto de Renda NÃO é calculado aqui — era emprestado da REV01 (célula
+    manual, sujeita a erro; ver _imposto_renda_calculado) até 2026-11-16,
+    quando virou um campo calculado (34% do LAIR do mês, só quando o LAIR
+    acumulado do ano já é positivo) pra não precisar mais olhar pra aquela
+    célula.
 
     "Outros Itens não Operacionais" também espelha o Realizado nos meses
     antes do corte (igual aos outros campos aqui) — nos meses dentro da
@@ -823,16 +828,14 @@ def _despesa_mensal_com_fonte_nova(
     mes_corte = mes_corte_revisao(revisao, pd.Timestamp(mes_fim).year)
 
     financeira_rev01 = _serie_mensal_previsto(df_previsto, "REV01", cenario, CODIGO_DESPESA_FINANCEIRA)
-    ir_rev01 = _serie_mensal_previsto(df_previsto, "REV01", cenario, CODIGO_IMPOSTO_RENDA)
 
-    despesa_adm = despesa_financeira = imposto_renda = outros = 0.0
+    despesa_adm = despesa_financeira = outros = 0.0
     algum_mes_provisorio = False
     for mes in pd.date_range(mes_ini, mes_fim, freq="MS"):
         if mes < mes_corte:
             dre_mes = calcular_dre(df_real[df_real["Mes"] == mes])
             despesa_adm += dre_mes["despesa_adm"]
             despesa_financeira += dre_mes["despesa_financeira"]
-            imposto_renda += dre_mes["imposto_renda"]
             outros += dre_mes["outros"]
             continue
         despesa_adm += despesa_adm_mensal_nova.get(mes, 0.0)
@@ -840,13 +843,11 @@ def _despesa_mensal_com_fonte_nova(
             despesa_financeira += despesa_financeira_mensal_nova.get(mes, 0.0)
         else:
             despesa_financeira += financeira_rev01.get(mes, 0.0)
-        imposto_renda += ir_rev01.get(mes, 0.0)
         algum_mes_provisorio = True
 
     return {
         "despesa_adm": despesa_adm,
         "despesa_financeira": despesa_financeira,
-        "imposto_renda": imposto_renda,
         "outros": outros,
         "provisorio": algum_mes_provisorio,
     }
@@ -885,38 +886,27 @@ def _receita_custo_mensal_com_mes_corte(
     return total if algum_mes_com_dado else None
 
 
-@st.cache_data(show_spinner=False)
-def calcular_previsto_com_fallback_despesa(
+def _previsto_efetivo_sem_ir(
     df_previsto: pd.DataFrame,
     df_refinado: pd.DataFrame,
     revisao: str,
     cenario: str,
     mes_ini,
     mes_fim,
-    df_real: pd.DataFrame | None = None,
-) -> tuple[dict | None, bool]:
-    """Retorna (totais, despesa_e_provisoria).
-
-    REV00/REV01 usam a cascata cheia normal (já têm Despesa própria). REV02
-    e REV03 usam a Despesa própria (DESPESA REV02.xlsx/DESPESA REV03.xlsx)
-    combinada mês a mês com o Realizado pros meses já fechados — ver
-    _despesa_mensal_com_fonte_nova. Despesa Financeira/Imposto de Renda
-    seguem emprestados da REV01 pros dois (nenhuma das duas tem fonte
-    própria pra isso ainda). Receita Bruta/Custo/Margem Bruta usam o mesmo
-    espelhamento antes do corte (ver _receita_custo_mensal_com_mes_corte).
-    """
-    if revisao in ("REV00", "REV01"):
-        sub = df_previsto[
-            (df_previsto["Revisão"] == revisao) & (df_previsto["Mes"] >= mes_ini) & (df_previsto["Mes"] <= mes_fim)
-        ]
-        return calcular_previsto(sub, cenario), False
-
+    df_real: pd.DataFrame | None,
+) -> dict | None:
+    """Receita Bruta...LAIR (sem Imposto de Renda/Lucro Líquido) pra
+    REV02/REV03, mesma regra de calcular_previsto_com_fallback_despesa.
+    Separado pra poder ser chamado mês a mês (por _lair_mensal_rev) sem
+    cair em recursão com o cálculo de Imposto de Renda, que depende do
+    LAIR mês a mês do ano inteiro (ver _imposto_renda_calculado) — LAIR
+    em si nunca depende de Imposto de Renda."""
     if df_real is not None:
         base = _receita_custo_mensal_com_mes_corte(df_real, df_refinado, revisao, cenario, mes_ini, mes_fim)
     else:
         base = calcular_previsto_refinado(df_refinado, revisao, cenario, mes_ini, mes_fim)
     if base is None:
-        return None, False
+        return None
 
     if revisao == "REV03" and df_real is not None:
         fonte_nova = _despesa_total_mensal_rev03()
@@ -949,7 +939,111 @@ def calcular_previsto_com_fallback_despesa(
         if resultado["ebit"] is not None and resultado["despesa_financeira"] is not None
         else None
     )
-    resultado["imposto_renda"] = despesa.get("imposto_renda")
+    resultado["provisorio"] = provisorio
+    return resultado
+
+
+# Alíquota combinada de IRPJ + CSLL (25% + 9%) sobre o Lucro Real — usada
+# pelo Imposto de Renda calculado do Orçado (ver _imposto_renda_calculado).
+TAXA_IRPJ_CSLL = 0.34
+
+
+@st.cache_data(show_spinner=False)
+def _lair_mensal_rev(
+    df_previsto: pd.DataFrame, df_refinado: pd.DataFrame, df_real: pd.DataFrame | None, revisao: str, cenario: str, ano: int
+) -> pd.Series:
+    """LAIR mês a mês (sem Imposto de Renda), Jan a Dez — base pra decidir,
+    mês a mês, se o Imposto de Renda calculado incide (ver
+    _imposto_renda_calculado). Mês sem nenhuma base (Receita/Despesa) vira
+    None, nunca 0 — não deve contar como "prejuízo" nem como "lucro" no
+    acumulado."""
+    valores = {}
+    for mes in pd.date_range(f"{ano}-01-01", f"{ano}-12-01", freq="MS"):
+        resultado = _previsto_efetivo_sem_ir(df_previsto, df_refinado, revisao, cenario, mes, mes, df_real)
+        valores[mes] = resultado["lair"] if resultado else None
+    return pd.Series(valores)
+
+
+def _imposto_renda_calculado(
+    df_previsto: pd.DataFrame,
+    df_refinado: pd.DataFrame,
+    df_real: pd.DataFrame | None,
+    revisao: str,
+    cenario: str,
+    mes_ini,
+    mes_fim,
+) -> float | None:
+    """Imposto de Renda do Orçado (REV02/REV03), calculado como
+    TAXA_IRPJ_CSLL do LAIR do mês, só nos meses em que o LAIR acumulado do
+    ano (Jan até o mês ANTERIOR, nunca incluindo o próprio mês) já é
+    positivo — confirmado pelo usuário (2026-11-16): tributa só lucro de
+    verdade, nunca virando um crédito (IR positivo) pra compensar prejuízo
+    acumulado, e fica zero (não negativo) enquanto o acumulado ainda é
+    negativo, mesmo que o mês isolado dê lucro. Substitui o valor que até
+    então vinha emprestado da REV01 (célula mantida manualmente na
+    planilha de origem, sujeita a erro de digitação/sinal) — não depende
+    mais dela.
+
+    Trava extra (confirmada pelo usuário, 2026-11-16): Imposto de Renda do
+    Previsto NUNCA pode ser positivo, em hipótese nenhuma — mesmo com o
+    acumulado anterior positivo, um mês isolado com LAIR negativo (ex.:
+    Out/26) geraria matematicamente um "crédito" (-34% de um LAIR
+    negativo = valor positivo); esse mês entra como 0, não como crédito."""
+    ano = pd.Timestamp(mes_fim).year
+    lair_mensal = _lair_mensal_rev(df_previsto, df_refinado, df_real, revisao, cenario, ano)
+
+    acumulado = 0.0
+    total_ir = 0.0
+    algum_mes_com_dado = False
+    for mes in pd.date_range(f"{ano}-01-01", f"{ano}-12-01", freq="MS"):
+        lair_mes = lair_mensal.get(mes)
+        if mes_ini <= mes <= mes_fim:
+            if lair_mes is not None:
+                algum_mes_com_dado = True
+                if acumulado > 0:
+                    total_ir += min(-TAXA_IRPJ_CSLL * lair_mes, 0.0)
+        if lair_mes is not None:
+            acumulado += lair_mes
+        if mes >= mes_fim:
+            break
+    return total_ir if algum_mes_com_dado else None
+
+
+@st.cache_data(show_spinner=False)
+def calcular_previsto_com_fallback_despesa(
+    df_previsto: pd.DataFrame,
+    df_refinado: pd.DataFrame,
+    revisao: str,
+    cenario: str,
+    mes_ini,
+    mes_fim,
+    df_real: pd.DataFrame | None = None,
+) -> tuple[dict | None, bool]:
+    """Retorna (totais, despesa_e_provisoria).
+
+    REV00/REV01 usam a cascata cheia normal (já têm Despesa própria, com
+    Imposto de Renda também próprio — nunca calculado). REV02 e REV03 usam
+    a Despesa própria (DESPESA REV02.xlsx/DESPESA REV03.xlsx) combinada mês
+    a mês com o Realizado pros meses já fechados (ver
+    _despesa_mensal_com_fonte_nova) e Despesa Financeira emprestada da
+    REV01 (nenhuma das duas tem fonte própria pra isso ainda). Receita
+    Bruta/Custo/Margem Bruta usam o mesmo espelhamento antes do corte (ver
+    _receita_custo_mensal_com_mes_corte). Imposto de Renda é calculado
+    (ver _imposto_renda_calculado), não emprestado."""
+    if revisao in ("REV00", "REV01"):
+        sub = df_previsto[
+            (df_previsto["Revisão"] == revisao) & (df_previsto["Mes"] >= mes_ini) & (df_previsto["Mes"] <= mes_fim)
+        ]
+        return calcular_previsto(sub, cenario), False
+
+    resultado = _previsto_efetivo_sem_ir(df_previsto, df_refinado, revisao, cenario, mes_ini, mes_fim, df_real)
+    if resultado is None:
+        return None, False
+    provisorio = resultado.pop("provisorio")
+
+    resultado["imposto_renda"] = _imposto_renda_calculado(
+        df_previsto, df_refinado, df_real, revisao, cenario, mes_ini, mes_fim
+    )
     resultado["lucro_liquido"] = (
         resultado["lair"] + resultado["imposto_renda"]
         if resultado["lair"] is not None and resultado["imposto_renda"] is not None
