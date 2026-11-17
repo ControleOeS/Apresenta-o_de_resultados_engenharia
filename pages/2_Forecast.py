@@ -435,34 +435,17 @@ st.divider()
 
 df_receita_exp = editado[["Classificação", "Complexo"] + rotulos_meses + [f"Total {ano}", "AV%"]].copy()
 
-# Lucro Bruto — mesmos 12 meses da Receita Bruta Mensal (não só os meses em
-# aberto do editor): meses em aberto vêm do editor ao vivo; meses já
-# fechados vêm do que foi salvo pra essa linha enquanto ainda estava em
-# aberto (lucro_salvo), já que o editor_lucro_bruto só mostra os meses
-# ainda não fechados.
-lucro_editor_por_chave = {}
-for _, linha in editado_lucro.iterrows():
-    chave = chave_linha(linha.get("Classificação") or "", linha.get("Complexo") or "")
-    lucro_editor_por_chave[chave] = linha
-
-linhas_lucro_exp = []
-for _, linha in editado.iterrows():
-    classificacao = linha.get("Classificação")
-    complexo = linha.get("Complexo")
-    classificacao_str = "" if pd.isna(classificacao) else str(classificacao)
-    complexo_str = "" if pd.isna(complexo) else str(complexo)
-    chave = chave_linha(classificacao_str, complexo_str)
-    linha_editor_lucro = lucro_editor_por_chave.get(chave)
-    registro = {"Classificação": classificacao_str, "Complexo": complexo_str}
-    for mes in todos_meses_ano:
-        rotulo = _rotulo_mes(mes)
-        if mes in meses_fc:
-            registro[rotulo] = linha_editor_lucro.get(rotulo) if linha_editor_lucro is not None else None
-        else:
-            registro[rotulo] = lucro_salvo.get(chave, {}).get(_chave_mes(mes))
-    registro[f"Total {ano}"] = sum(v for v in (registro[_rotulo_mes(m)] for m in todos_meses_ano) if v is not None and not pd.isna(v))
-    linhas_lucro_exp.append(registro)
-df_lucro_exp = pd.DataFrame(linhas_lucro_exp, columns=["Classificação", "Complexo"] + rotulos_meses + [f"Total {ano}"])
+# Lucro Bruto só sai pros meses em aberto (rotulos_fc) — tentamos estender
+# pros meses já fechados usando o nome do "Complexo" pra achar o Centro de
+# Custo correspondente no Realizado, mas não bate: o nome digitado no
+# Forecast é uma versão resumida/digitada à mão (ex. "HYDRO ALUNORTE
+# ACESSO E ISOLAMENTO PA") e o Centro de Custo real do Realizado tem outra
+# grafia (ex. "HYDRO ALUNORTE - ACESSO E ISOLAMENTO - BARCARENA- PA") — 0
+# de 37 linhas batem exatamente, e casar por aproximação seria chute (o
+# que não é aceitável pra dado financeiro). Até existir um de-para
+# confiável Complexo -> Centro de Custo, os meses fechados ficam de fora
+# em vez de sair com valor errado ou em branco fingindo ser dado real.
+df_lucro_exp = editado_lucro[["Classificação", "Complexo"] + rotulos_fc].copy()
 
 # Detalhamento linha a linha do Forecast (só meses em aberto — mesmas
 # linhas/valores já usados na validação/DRE acima).
