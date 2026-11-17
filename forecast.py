@@ -308,6 +308,19 @@ def fechar_dre_ano(
     return dre_por_mes
 
 
+def gerar_excel_export(planilhas: dict[str, pd.DataFrame]) -> bytes:
+    """Gera um .xlsx em memória a partir de {nome_da_aba: DataFrame} — pro
+    botão "Exportar Excel" da página Forecast (só leitura/exportação do que
+    já está na tela, não mexe em nada salvo no Dropbox)."""
+    import io
+
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        for nome, df in planilhas.items():
+            df.to_excel(writer, sheet_name=nome[:31], index=False)
+    return buffer.getvalue()
+
+
 def validar_lucro_bruto(
     receita_por_linha: dict[str, float],
     lucro_por_linha: dict[str, float | None],

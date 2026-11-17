@@ -8,6 +8,9 @@ from dados import (
     LINHAS_DRE_DEF,
     LINHAS_MARGEM,
     MESES_PT,
+    NIVEL_DESPESA_FINANCEIRA,
+    NIVEL_IMPOSTO_RENDA,
+    NIVEL_OUTROS,
     carregar_meta_mensal,
     carregar_previsto,
     carregar_previsto_refinado,
@@ -21,11 +24,21 @@ from forecast import (
     carregar_forecast,
     chave_linha,
     fechar_dre_ano,
+    fechar_linha,
+    gerar_excel_export,
+    imposto_pct_linha,
     lucro_bruto_padrao,
     meses_forecast,
     revisao_atual_forecast,
     salvar_forecast,
     validar_lucro_bruto,
+)
+from analise_categoria import (
+    _detalhar,
+    custo_por_cc_realizado,
+    despesa_por_cc_realizado,
+    imposto_por_cc_realizado,
+    receita_por_cc_realizado,
 )
 from auth import mostrar_banner_ambiente, pedir_senha_edicao_forecast, pode_editar_forecast, require_password
 
@@ -397,4 +410,112 @@ st.caption(
     "base só tem 2026. **Meta Otimista/Δ** = DRE anual alvo (META ANO SUPERUS.xlsx, Cenário "
     "Otimista) pro ano inteiro, só como referência — não entra em nenhum cálculo; Δ = Forecast "
     "menos Meta."
+)
+
+# ------------------------------------------------------------------
+# Exportar Excel — snapshot completo do que está na tela agora: Receita
+# Bruta Mensal e Lucro Bruto (linha a linha), o detalhamento linha a linha
+# do Forecast (Receita/Imposto/Receita Líquida/Custo/Lucro Bruto por mês
+# em aberto), o detalhamento do Realizado por Centro de Custo (meses já
+# fechados) e a DRE consolidada (Realizado + Forecast, mês a mês). Só
+# leitura: não mexe em nada salvo no Dropbox.
+# ------------------------------------------------------------------
+st.divider()
+
+df_receita_exp = editado[["Classificação", "Complexo"] + rotulos_meses + [f"Total {ano}", "AV%"]].copy()
+df_lucro_exp = editado_lucro[["Classificação", "Complexo"] + rotulos_fc].copy()
+
+# Detalhamento linha a linha do Forecast (só meses em aberto — mesmas
+# linhas/valores já usados na validação/DRE acima).
+detalhe_forecast_linhas = []
+for _, linha in editado.iterrows():
+    classificacao = linha.get("Classificação")
+    complexo = linha.get("Complexo")
+    if (pd.isna(classificacao) or not str(classificacao).strip()) and (pd.isna(complexo) or not str(complexo).strip()):
+        continue
+    classificacao_str = "" if pd.isna(classificacao) else str(classificacao)
+    complexo_str = "" if pd.isna(complexo) else str(complexo)
+    chave = chave_linha(classificacao_str, complexo_str)
+    imposto_pct = imposto_pct_linha(complexo_str)
+    for mes in meses_fc:
+        chave_mes = _chave_mes(mes)
+        receita_bruta_linha = receita_por_linha_mes[chave_mes].get(chave) or 0.0
+        lucro_bruto_linha = lucro_por_linha_mes[chave_mes].get(chave)
+        if not receita_bruta_linha or lucro_bruto_linha is None:
+            continue
+        fechado = fechar_linha(receita_bruta_linha, lucro_bruto_linha, imposto_pct)
+        detalhe_forecast_linhas.append(
+            {
+                "Classificação": classificacao_str,
+                "Complexo": complexo_str,
+                "Mês": _rotulo_mes(mes),
+                "Receita Bruta": fechado["receita_bruta"],
+                "Imposto": fechado["imposto"],
+                "Receita Líquida": fechado["receita_liquida"],
+                "Custo": fechado["custo"],
+                "Lucro Bruto": fechado["margem_bruta"],
+            }
+        )
+df_forecast_detalhado = pd.DataFrame(
+    detalhe_forecast_linhas,
+    columns=["Classificação", "Complexo", "Mês", "Receita Bruta", "Imposto", "Receita Líquida", "Custo", "Lucro Bruto"],
+)
+
+# Detalhamento do Realizado por Centro de Custo (meses já fechados, antes
+# do Forecast) — reaproveita as mesmas funções de categoria usadas no
+# resto do app, mês a mês.
+_funcoes_realizado = [
+    ("Receita Bruta", lambda m: receita_por_cc_realizado(df_real, m, m)),
+    ("Imposto", lambda m: imposto_por_cc_realizado(df_real, m, m)),
+    ("Custo", lambda m: custo_por_cc_realizado(df_real, m, m)),
+    ("Despesa Administrativa", lambda m: despesa_por_cc_realizado(df_real, m, m)),
+    ("Outros", lambda m: _detalhar(df_real[df_real["Nível 1"].isin(NIVEL_OUTROS) & (df_real["Mes"] == m)], "Cod. Centro de Custo", "Centro de Custo")),
+    ("Despesa Financeira", lambda m: _detalhar(df_real[df_real["Nível 1"].isin(NIVEL_DESPESA_FINANCEIRA) & (df_real["Mes"] == m)], "Cod. Centro de Custo", "Centro de Custo")),
+    ("Imposto de Renda", lambda m: _detalhar(df_real[df_real["Nível 1"].isin(NIVEL_IMPOSTO_RENDA) & (df_real["Mes"] == m)], "Cod. Centro de Custo", "Centro de Custo")),
+]
+_partes_realizado = []
+for mes in meses_realizado:
+    for tipo_nome, funcao in _funcoes_realizado:
+        detalhe = funcao(mes)
+        if detalhe is None or detalhe.empty:
+            continue
+        detalhe = detalhe.copy()
+        detalhe["Tipo"] = tipo_nome
+        detalhe["Mês"] = _rotulo_mes(mes)
+        _partes_realizado.append(detalhe)
+df_realizado_detalhado = (
+    pd.concat(_partes_realizado, ignore_index=True)[["Mês", "Tipo", "Categoria", "Codigo", "Centro de Custo", "Valor"]]
+    if _partes_realizado
+    else pd.DataFrame(columns=["Mês", "Tipo", "Categoria", "Codigo", "Centro de Custo", "Valor"])
+)
+
+linhas_dre_exp = []
+for nome, campo, _ in LINHAS_DRE_DEF:
+    registro = {"DRE": nome}
+    for mes in dre_por_mes:
+        registro[f"{MESES_PT[mes.month]}/{str(mes.year)[2:]}"] = dre_por_mes[mes][campo]
+    registro[f"Total {ano}"] = dre_total_ano[campo]
+    linhas_dre_exp.append(registro)
+df_dre_exp = pd.DataFrame(linhas_dre_exp)
+
+excel_bytes = gerar_excel_export(
+    {
+        "Receita Bruta Mensal": df_receita_exp,
+        "Lucro Bruto": df_lucro_exp,
+        "Forecast Detalhado": df_forecast_detalhado,
+        "Realizado Detalhado": df_realizado_detalhado,
+        "DRE": df_dre_exp,
+    }
+)
+st.download_button(
+    "📥 Exportar Forecast em Excel",
+    data=excel_bytes,
+    file_name=f"forecast_{ano}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    help=(
+        "Receita Bruta Mensal / Lucro Bruto: linhas do Forecast (ano todo). "
+        "Forecast Detalhado: Receita/Imposto/Receita Líquida/Custo/Lucro Bruto linha a linha, "
+        "só meses em aberto. Realizado Detalhado: mesma quebra por Centro de Custo, mês a mês, "
+        "pros meses já fechados. DRE: consolidado mensal (Realizado + Forecast)."
+    ),
 )
