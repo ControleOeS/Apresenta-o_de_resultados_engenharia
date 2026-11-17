@@ -7,3 +7,9 @@ primaryColor = "#1C3024"
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F4F6F2"
 textColor = "#1A1A1A"
+# Cabeçalho de todo st.dataframe/st.data_editor no verde-escuro da
+# identidade visual Superus (mesma cor do header das tabelas HTML em
+# estilo.py), em vez do cinza padrão do Streamlit.
+dataframeHeaderBackgroundColor = "#1C3024"
+dataframeHeaderTextColor = "#FFFFFF"
+dataframeBorderColor = "#C9D6C0"

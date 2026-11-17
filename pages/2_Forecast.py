@@ -144,9 +144,16 @@ editado = st.data_editor(
     # do Forecast, a tabela toda fica travada (só visualização).
     disabled=True if not edicao_liberada else [*rotulos_realizado, f"Total {ano}", "AV%"],
     column_config={
-        **{col: st.column_config.NumberColumn(col, format="localized", step=1000) for col in rotulos_meses},
-        f"Total {ano}": st.column_config.NumberColumn(f"Total {ano}", format="localized", step=1),
-        "AV%": st.column_config.NumberColumn("AV%", format="percent"),
+        "Classificação": st.column_config.TextColumn("Classificação", width="medium", pinned=True),
+        "Complexo": st.column_config.TextColumn("Complexo", width="large", pinned=True),
+        # Sem casa decimal, sem indicador de moeda (fica só no título "(em
+        # R$)" da seção) e com separador de milhar — "," é a única opção de
+        # agrupamento que o data_editor do Streamlit aceita hoje (sem
+        # suporte nativo a locale pt-BR; as tabelas de DRE/Resumo abaixo,
+        # que não são editáveis, continuam no padrão brasileiro com ponto).
+        **{col: st.column_config.NumberColumn(col, format="%,d", step=1000, width="small") for col in rotulos_meses},
+        f"Total {ano}": st.column_config.NumberColumn(f"Total {ano}", format="%,d", step=1, width="small"),
+        "AV%": st.column_config.NumberColumn("AV%", format="percent", width="small"),
     },
     key="editor_receita_mensal",
 )
@@ -243,7 +250,11 @@ editado_lucro = st.data_editor(
     hide_index=True,
     use_container_width=True,
     disabled=True if not edicao_liberada else ["Classificação", "Complexo"],
-    column_config={col: st.column_config.NumberColumn(col, format="localized", step=1000) for col in rotulos_fc},
+    column_config={
+        "Classificação": st.column_config.TextColumn("Classificação", width="medium", pinned=True),
+        "Complexo": st.column_config.TextColumn("Complexo", width="large", pinned=True),
+        **{col: st.column_config.NumberColumn(col, format="%,d", step=1000, width="small") for col in rotulos_fc},
+    },
     key="editor_lucro_bruto",
 )
 
@@ -505,7 +516,8 @@ excel_bytes = gerar_excel_export(
         "Forecast Detalhado": df_forecast_detalhado,
         "Realizado Detalhado": df_realizado_detalhado,
         "DRE": df_dre_exp,
-    }
+    },
+    colunas_percentual={"Receita Bruta Mensal": ["AV%"]},
 )
 st.download_button(
     "📥 Exportar Forecast em Excel",

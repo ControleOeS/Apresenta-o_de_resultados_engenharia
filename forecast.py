@@ -308,16 +308,54 @@ def fechar_dre_ano(
     return dre_por_mes
 
 
-def gerar_excel_export(planilhas: dict[str, pd.DataFrame]) -> bytes:
+def gerar_excel_export(
+    planilhas: dict[str, pd.DataFrame],
+    colunas_percentual: dict[str, list[str]] | None = None,
+) -> bytes:
     """Gera um .xlsx em memória a partir de {nome_da_aba: DataFrame} — pro
     botão "Exportar Excel" da página Forecast (só leitura/exportação do que
-    já está na tela, não mexe em nada salvo no Dropbox)."""
+    já está na tela, não mexe em nada salvo no Dropbox).
+
+    Toda coluna numérica (float/int) sai formatada como número com
+    separador de milhar e sem casa decimal/indicador de moeda — mesma regra
+    da tabela na tela (a unidade fica só no título da aba/seção, não em
+    cada célula); o separador decimal/milhar exibido no Excel segue a
+    configuração regional do próprio Excel de quem abre (normalmente
+    pt-BR), não fica fixo no arquivo. `colunas_percentual` (por aba) sai
+    como percentual em vez de número. Cabeçalho no verde-escuro da
+    identidade visual Superus, colunas com largura ajustada ao conteúdo."""
     import io
+
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    from estilo import VERDE_ESCURO
+
+    colunas_percentual = colunas_percentual or {}
+    cor_cabecalho = f"FF{VERDE_ESCURO.lstrip('#')}"
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         for nome, df in planilhas.items():
-            df.to_excel(writer, sheet_name=nome[:31], index=False)
+            aba = nome[:31]
+            df.to_excel(writer, sheet_name=aba, index=False)
+            planilha = writer.sheets[aba]
+            percentuais = set(colunas_percentual.get(nome, []))
+
+            for col_idx, coluna in enumerate(df.columns, start=1):
+                celula_cabecalho = planilha.cell(row=1, column=col_idx)
+                celula_cabecalho.font = Font(color="FFFFFF", bold=True)
+                celula_cabecalho.fill = PatternFill("solid", fgColor=cor_cabecalho)
+                celula_cabecalho.alignment = Alignment(horizontal="center")
+
+                maior_largura = max([len(str(coluna))] + [len(str(v)) for v in df[coluna]]) if not df.empty else len(str(coluna))
+                planilha.column_dimensions[celula_cabecalho.column_letter].width = min(max(maior_largura + 2, 10), 42)
+
+                if pd.api.types.is_numeric_dtype(df[coluna]):
+                    formato = "0.0%" if coluna in percentuais else "#,##0"
+                    for linha_idx in range(2, len(df) + 2):
+                        planilha.cell(row=linha_idx, column=col_idx).number_format = formato
+
+            planilha.freeze_panes = "A2"
     return buffer.getvalue()
 
 
