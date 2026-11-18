@@ -22,6 +22,9 @@ from estilo import VERDE_ESCURO, VERMELHO, render_tabela_com_faixa
 from formatting import format_brl_md, format_pct_av, format_pp
 from forecast import (
     CLASSIFICACAO_FUNIL_VENDAS,
+    FONTE_FORECAST_OPORTUNIDADES,
+    FONTE_FORECAST_PADRAO,
+    FONTES_FORECAST,
     LINHAS_RECEITA_SEED,
     carregar_forecast,
     chave_linha,
@@ -295,7 +298,33 @@ if edicao_liberada and st.button("💾 Salvar Forecast", type="primary"):
 st.divider()
 
 # ------------------------------------------------------------------
-# Validação — nenhuma DRE aparece enquanto houver erro.
+# Fonte da Receita Bruta/Margem Bruta pra DRE abaixo — mesmo seletor/
+# rótulos já existentes no DASH_DIRETORIA. "Forecast" = a Receita Bruta
+# Mensal/Lucro Bruto editados acima (padrão, comportamento de sempre);
+# "Forecast de Oportunidades" = cenário alternativo e estático,
+# sincronizado à parte (forecast_oportunidades.py) — pedido do usuário,
+# 2026-11-18.
+# ------------------------------------------------------------------
+fonte_forecast = st.radio(
+    "Fonte da Receita Bruta/Margem Bruta do Forecast",
+    FONTES_FORECAST,
+    key="pg_fonte_forecast",
+    horizontal=True,
+)
+if fonte_forecast == FONTE_FORECAST_OPORTUNIDADES:
+    st.caption(
+        "Forecast de Oportunidades = cenário alternativo e **estático** (aba \"Forecast super "
+        "otimista\" de um Excel à parte, sincronizado pelo DASH_DIRETORIA) — só muda se alguém "
+        "editar aquele arquivo e rodar o sync de novo; não dá pra editar por aqui. A Receita Bruta "
+        "Mensal/Lucro Bruto editados acima continuam salvos normalmente, só não entram na DRE "
+        "abaixo enquanto essa opção estiver selecionada. Despesa Administrativa/Financeira "
+        "continuam vindo da Revisão \"em vigor\", igual ao Forecast normal."
+    )
+
+# ------------------------------------------------------------------
+# Validação — nenhuma DRE aparece enquanto houver erro (só quando a fonte
+# escolhida é o Forecast manual — "Forecast de Oportunidades" não depende
+# do Lucro Bruto editado acima).
 # ------------------------------------------------------------------
 nomes_linha = {}
 receita_por_linha_mes = {}
@@ -328,7 +357,7 @@ for mes in meses_fc:
     chave_mes = _chave_mes(mes)
     erros += validar_lucro_bruto(receita_por_linha_mes[chave_mes], lucro_por_linha_mes[chave_mes], nomes_linha, _rotulo_mes(mes))
 
-if erros:
+if erros and fonte_forecast == FONTE_FORECAST_PADRAO:
     st.error("⚠️ A DRE só aparece depois que o Lucro Bruto estiver certo:\n\n" + "\n".join(f"- {e}" for e in erros))
     st.stop()
 
@@ -341,6 +370,7 @@ st.header(f"DRE — {ano}")
 dre_por_mes = fechar_dre_ano(
     df_real, df_previsto, df_refinado, revisao_atual, meses_realizado, meses_fc,
     receita_por_linha_mes, lucro_por_linha_mes, nomes_linha,
+    fonte_forecast=fonte_forecast,
 )
 
 dre_total_ano = {campo: sum(dre_por_mes[mes][campo] for mes in dre_por_mes) for _, campo, _ in LINHAS_DRE_DEF}
@@ -448,7 +478,13 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+_fonte_forecast_legenda = (
+    "Forecast de Oportunidades (cenário estático à parte)"
+    if fonte_forecast == FONTE_FORECAST_OPORTUNIDADES
+    else "Forecast (Receita Bruta Mensal/Lucro Bruto editados acima)"
+)
 st.caption(
+    f"{MESES_PT[meses_fc[0].month]}-{MESES_PT[meses_fc[-1].month]}/{ano} = {_fonte_forecast_legenda}. "
     "Os gráficos de histórico 2022-2025 (parte de baixo da página 6) continuam bloqueados — essa "
     "base só tem 2026. **Meta Otimista/Δ** = Orçado (Cenário Otimista) da Revisão em vigor "
     f"(**{revisao_atual}**) pro ano inteiro — acompanha automaticamente a Revisão mais recente "

@@ -34,7 +34,16 @@ from estilo import (
 )
 from formatting import format_brl_compacto, format_brl_md, format_pct, format_pct_av, format_pp
 from exportar_pdf import gerar_pdf, localizar_navegador, porta_do_servidor_atual
-from forecast import dados_forecast_salvo, fechar_dre_ano, meses_forecast, revisao_atual_forecast, validar_lucro_bruto
+from forecast import (
+    FONTE_FORECAST_OPORTUNIDADES,
+    FONTE_FORECAST_PADRAO,
+    FONTES_FORECAST,
+    dados_forecast_salvo,
+    fechar_dre_ano,
+    meses_forecast,
+    revisao_atual_forecast,
+    validar_lucro_bruto,
+)
 from narrativa import gerar_analise
 from analise_complexos import MESES_NOVO_MOBILIZADO, construir_analise_complexos
 from graficos_complexos import grafico_pizza_duas_fatias, grafico_pizza_status
@@ -638,6 +647,33 @@ elif dre_mes_orc.get("despesa_adm") is None:
 st.divider()
 
 # ------------------------------------------------------------------
+# Fonte da Receita Bruta/Margem Bruta pra qualquer visão com Forecast desta
+# página (Curva S com base "Forecast" logo abaixo + tabela "DRE — Forecast"
+# mais adiante) — mesmo seletor/rótulos já existentes no DASH_DIRETORIA.
+# "Forecast" = preenchimento manual salvo na página "Forecast" (padrão,
+# comportamento de sempre); "Forecast de Oportunidades" = cenário
+# alternativo e estático, sincronizado à parte (forecast_oportunidades.py)
+# — pedido do usuário, 2026-11-18.
+# ------------------------------------------------------------------
+if meses_forecast(df_real, ano):
+    fonte_forecast = st.radio(
+        "Fonte da Receita Bruta/Margem Bruta do Forecast",
+        FONTES_FORECAST,
+        key="app_fonte_forecast",
+        horizontal=True,
+    )
+    if fonte_forecast == FONTE_FORECAST_OPORTUNIDADES:
+        st.caption(
+            "Forecast de Oportunidades = cenário alternativo e **estático** (aba \"Forecast super "
+            "otimista\" de um Excel à parte, sincronizado pelo DASH_DIRETORIA) — só muda se alguém "
+            "editar aquele arquivo e rodar o sync de novo; não dá pra editar por aqui. Despesa "
+            "Administrativa/Financeira continuam vindo da Revisão \"em vigor\", igual ao Forecast "
+            "normal."
+        )
+else:
+    fonte_forecast = FONTE_FORECAST_PADRAO
+
+# ------------------------------------------------------------------
 # Curva S — Orçado x Realizado Acumulado (ano inteiro, independe do Mês de
 # referência filtrado na barra lateral) — mesma visão já existente no
 # DASH_DIRETORIA, com as duas curvas de Orçado (Moderado/Otimista) — o
@@ -831,6 +867,7 @@ if base_curva_s_sel == "Forecast":
         dre_por_mes_cs = fechar_dre_ano(
             df_real, df_previsto, df_refinado, revisao_atual_forecast_cs,
             meses_realizado_cs, meses_fc_cs, receita_por_linha_mes_cs, lucro_por_linha_mes_cs, nomes_linha_cs,
+            fonte_forecast=fonte_forecast,
         )
         df_real_mensal_cs = pd.DataFrame([dict(dre, Mes=mes) for mes, dre in dre_por_mes_cs.items()])
     nome_real_cs = "Realizado + Forecast"
@@ -877,7 +914,11 @@ else:
             f"{MESES_PT[mes.month]}/{str(mes.year)[2:]}",
         )
 
-    if erros_forecast_app:
+    # Pendência de preenchimento do Forecast manual só bloqueia a DRE
+    # quando a fonte escolhida é o próprio Forecast manual — com "Forecast
+    # de Oportunidades" selecionado, a Receita/Margem Bruta não depende
+    # dele (vem do cenário estático), então a pendência não impede nada.
+    if fonte_forecast == FONTE_FORECAST_PADRAO and erros_forecast_app:
         st.warning(
             "⚠️ O Forecast salvo ainda tem pendência de preenchimento — corrija na página **Forecast** "
             "pra essa DRE aparecer aqui:\n\n" + "\n".join(f"- {e}" for e in erros_forecast_app)
@@ -886,6 +927,7 @@ else:
         dre_forecast_por_mes = fechar_dre_ano(
             df_real, df_previsto, df_refinado, revisao_atual_forecast_app,
             meses_realizado_app, meses_fc_app, receita_por_linha_mes_app, lucro_por_linha_mes_app, nomes_linha_app,
+            fonte_forecast=fonte_forecast,
         )
         dre_forecast_total_ano = {campo: sum(dre_forecast_por_mes[m][campo] for m in dre_forecast_por_mes) for _, campo, _ in LINHAS_DRE_DEF}
         base_av_forecast_ano = dre_forecast_total_ano["receita_liquida"]
@@ -997,11 +1039,16 @@ else:
             f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'FORECAST {ano} (em R$)', tabela_forecast_html, largura_total=True)}</div>",
             unsafe_allow_html=True,
         )
+        _fonte_forecast_legenda = (
+            "Forecast de Oportunidades (cenário estático à parte)"
+            if fonte_forecast == FONTE_FORECAST_OPORTUNIDADES
+            else "Forecast (preenchido na página **Forecast**)"
+        )
         st.caption(
             f"Jan-{MESES_PT[meses_realizado_app[-1].month]}/{ano} = Realizado fechado; "
-            f"{MESES_PT[meses_fc_app[0].month]}-{MESES_PT[meses_fc_app[-1].month]}/{ano} = Forecast "
-            "(preenchido na página **Forecast**, Revisão em vigor "
-            f"**{revisao_atual_forecast_app}** pra Despesa). **Meta Otimista/Δ** = Orçado (Cenário "
+            f"{MESES_PT[meses_fc_app[0].month]}-{MESES_PT[meses_fc_app[-1].month]}/{ano} = "
+            f"{_fonte_forecast_legenda}, Revisão em vigor "
+            f"**{revisao_atual_forecast_app}** pra Despesa. **Meta Otimista/Δ** = Orçado (Cenário "
             f"Otimista) da Revisão em vigor (**{revisao_atual_forecast_app}**) pro ano inteiro — "
             "acompanha automaticamente a Revisão mais recente conforme o ano avança; não entra em "
             f"nenhum cálculo do Forecast; Δ = Forecast menos Meta. **Realizado {ano - 1}/Δ** = DRE "

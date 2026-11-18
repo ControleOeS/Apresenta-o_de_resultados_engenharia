@@ -37,9 +37,20 @@ import pandas as pd
 from config import DROPBOX_FORECAST
 from dados import calcular_dre, calcular_previsto_com_fallback_despesa, revisao_vigente_no_mes
 from dropbox_io import baixar_json, salvar_json
+from forecast_oportunidades import carregar_forecast_oportunidades
 
 CENARIO_FORECAST = "Otimista"
 IMPOSTO_FORECAST_PCT = 0.10
+
+# Fontes possíveis pra Receita Bruta/Margem Bruta dos meses de Forecast —
+# mesmo seletor ("Fonte da Receita Bruta/Margem Bruta...") já existente no
+# DASH_DIRETORIA. "Forecast" = preenchimento manual salvo (comportamento de
+# sempre, linha a linha, ver dados_forecast_salvo). "Forecast de
+# Oportunidades" = cenário alternativo e estático, sincronizado à parte
+# (ver forecast_oportunidades.py) — pedido do usuário, 2026-11-18.
+FONTE_FORECAST_PADRAO = "Forecast"
+FONTE_FORECAST_OPORTUNIDADES = "Forecast de Oportunidades"
+FONTES_FORECAST = [FONTE_FORECAST_PADRAO, FONTE_FORECAST_OPORTUNIDADES]
 
 # Margem Bruta % padrão pra pré-preencher o Lucro Bruto de uma linha
 # quando ainda não foi salvo nada pra ela — editável livremente depois,
@@ -278,24 +289,46 @@ def fechar_dre_ano(
     receita_por_linha_mes: dict,
     lucro_por_linha_mes: dict,
     nomes_linha: dict,
+    fonte_forecast: str = FONTE_FORECAST_PADRAO,
 ) -> dict[pd.Timestamp, dict]:
     """DRE completa do ano: Realizado (meses_realizado, direto do Realizado
-    fechado) + Forecast (meses_fc, Receita/Lucro Bruto linha a linha +
-    Despesa da Revisão em vigor) — mesmo cálculo usado na página Forecast,
-    só que reutilizável (ex: pra mostrar na página principal também).
-    `nomes_linha` (chave_linha -> nome do Complexo) decide o Imposto de
-    cada linha (ver imposto_pct_linha — Indenização não paga)."""
+    fechado) + Forecast (meses_fc, Despesa sempre da Revisão em vigor) —
+    mesmo cálculo usado na página Forecast, só que reutilizável (ex: pra
+    mostrar na página principal também). `nomes_linha` (chave_linha -> nome
+    do Complexo) decide o Imposto de cada linha (ver imposto_pct_linha —
+    Indenização não paga).
+
+    `fonte_forecast` escolhe de onde vem a Receita Bruta/Margem Bruta dos
+    meses de Forecast: FONTE_FORECAST_PADRAO ("Forecast") soma
+    `receita_por_linha_mes`/`lucro_por_linha_mes` linha a linha (o
+    preenchimento manual salvo); FONTE_FORECAST_OPORTUNIDADES ("Forecast de
+    Oportunidades") usa o total mensal estático de
+    forecast_oportunidades.carregar_forecast_oportunidades() — mês sem
+    linha nessa fonte (arquivo ainda não sincronizado) fecha com Receita/
+    Margem Bruta zeradas, nunca quebra."""
     dre_por_mes = {}
     for mes in meses_realizado:
         dre_por_mes[mes] = calcular_dre(df_real[df_real["Mes"] == mes])
 
+    campos_receita_margem = ["receita_bruta", "imposto", "receita_liquida", "custo", "margem_bruta"]
+    oportunidades_por_mes = None
+    if fonte_forecast == FONTE_FORECAST_OPORTUNIDADES:
+        oportunidades_por_mes = carregar_forecast_oportunidades().set_index("Mes")
+
     for mes in meses_fc:
-        chave_mes = mes.strftime("%Y-%m")
-        linhas_receita_lucro = [
-            (receita_bruta, lucro_por_linha_mes[chave_mes].get(chave) or 0.0, imposto_pct_linha(nomes_linha.get(chave)))
-            for chave, receita_bruta in receita_por_linha_mes[chave_mes].items()
-        ]
-        dre_mes = calcular_dre_forecast_mes(linhas_receita_lucro)
+        if oportunidades_por_mes is not None:
+            if mes in oportunidades_por_mes.index:
+                linha_op = oportunidades_por_mes.loc[mes]
+                dre_mes = {campo: float(linha_op[campo]) for campo in campos_receita_margem}
+            else:
+                dre_mes = dict.fromkeys(campos_receita_margem, 0.0)
+        else:
+            chave_mes = mes.strftime("%Y-%m")
+            linhas_receita_lucro = [
+                (receita_bruta, lucro_por_linha_mes[chave_mes].get(chave) or 0.0, imposto_pct_linha(nomes_linha.get(chave)))
+                for chave, receita_bruta in receita_por_linha_mes[chave_mes].items()
+            ]
+            dre_mes = calcular_dre_forecast_mes(linhas_receita_lucro)
         despesa = despesa_dre_mes(df_previsto, df_refinado, df_real, revisao_atual, mes)
         dre_mes["despesa_adm"] = despesa["despesa_adm"]
         dre_mes["ebitda"] = dre_mes["margem_bruta"] + despesa["despesa_adm"]
