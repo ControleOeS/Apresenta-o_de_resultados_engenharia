@@ -11,10 +11,12 @@ from dados import (
     NIVEL_DESPESA_FINANCEIRA,
     NIVEL_IMPOSTO_RENDA,
     NIVEL_OUTROS,
-    carregar_meta_mensal,
     carregar_previsto,
     carregar_previsto_refinado,
+    carregar_realizado_2025_mensal,
     carregar_realizado_superus,
+    dre_2025_periodo,
+    previsto_mensal_ano,
 )
 from estilo import VERDE_ESCURO, VERMELHO, render_tabela_com_faixa
 from formatting import format_brl_md, format_pct_av, format_pp
@@ -62,6 +64,7 @@ if not edicao_liberada:
 df_real = carregar_realizado_superus()
 df_previsto = carregar_previsto()
 df_refinado = carregar_previsto_refinado()
+realizado_2025_mensal = carregar_realizado_2025_mensal()
 
 ano = int(df_real["Mes"].max().year)
 meses_fc = meses_forecast(df_real, ano)
@@ -343,11 +346,23 @@ dre_por_mes = fechar_dre_ano(
 dre_total_ano = {campo: sum(dre_por_mes[mes][campo] for mes in dre_por_mes) for _, campo, _ in LINHAS_DRE_DEF}
 base_av_ano = dre_total_ano["receita_liquida"]
 
-# Meta Otimista (META ANO SUPERUS.xlsx) — só como colunas de referência
-# (Meta + Δ Forecast-Meta) no fim da mesma tabela, não entra em nenhum
-# cálculo do Forecast.
-meta_mensal = carregar_meta_mensal("Otimista")
-meta_total_ano = {campo: sum(meta_mensal[mes.month][campo] for mes in dre_por_mes) for _, campo, _ in LINHAS_DRE_DEF}
+# Meta Otimista — trocado de META ANO SUPERUS.xlsx (meta estática) pro
+# Orçado (Cenário Otimista) da Revisão "em vigor" (mesma Revisão usada pra
+# Despesa no Forecast), ano inteiro — pedido do usuário, 2026-11-18. Campo
+# sem base nenhuma pra algum mês vira None no total, nunca soma parcial.
+orc_mensal_otimista = previsto_mensal_ano(df_previsto, df_refinado, df_real, revisao_atual, "Otimista", ano)
+meta_total_ano = {
+    campo: (None if orc_mensal_otimista[campo].isna().any() else float(orc_mensal_otimista[campo].sum()))
+    for _, campo, _ in LINHAS_DRE_DEF
+}
+
+# Realizado do ano anterior — comparação direta com o Forecast do ano
+# corrente (ano inteiro), mesma fonte usada na DRE Mês/Acumulado do "app"
+# (RESULTADOS {ano-1}.xlsx, carregar_realizado_2025_mensal em dados.py).
+# Pedido do usuário, 2026-11-18.
+dre_ano_anterior_total = dre_2025_periodo(
+    realizado_2025_mensal, pd.Timestamp(year=ano, month=1, day=1), pd.Timestamp(year=ano, month=12, day=1)
+)
 
 TH_VALOR = f"padding:6px 6px; text-align:right; background-color:{VERDE_ESCURO}; color:white; font-weight:700; white-space:nowrap;"
 TH_META = f"padding:6px 6px; text-align:right; background-color:#5B7B4A; color:white; font-weight:700; white-space:nowrap;"
@@ -374,13 +389,18 @@ linhas_html = []
 for nome, campo, destaque in LINHAS_DRE_DEF:
     cor_fundo_linha = "#EAF2E0" if destaque else "#FFFFFF"
     estilo_linha = f"font-weight:700; background-color:{cor_fundo_linha};" if destaque else f"background-color:{cor_fundo_linha};"
+    valor_meta = meta_total_ano[campo]
+    valor_ano_anterior = dre_ano_anterior_total.get(campo) if dre_ano_anterior_total else None
     celulas = "".join(_td_valor(dre_por_mes[mes][campo]) for mes in dre_por_mes)
     celula_total = _td_valor(dre_total_ano[campo])
-    celula_meta = _td_valor(meta_total_ano[campo])
-    celula_delta = _td_valor(dre_total_ano[campo] - meta_total_ano[campo])
+    celula_meta = _td_valor(valor_meta)
+    celula_delta = _td_valor(None if valor_meta is None else dre_total_ano[campo] - valor_meta)
+    celula_ano_anterior = _td_valor(valor_ano_anterior)
+    celula_delta_ano_anterior = _td_valor(None if valor_ano_anterior is None else dre_total_ano[campo] - valor_ano_anterior)
     linhas_html.append(
         f"<tr style='{estilo_linha}'><td style='padding:6px 10px; white-space:nowrap; position:sticky; left:0; z-index:1; background-color:{cor_fundo_linha};'>{nome}</td>"
-        f"{celulas}{celula_total}{_espacador_td()}{celula_meta}{celula_delta}</tr>"
+        f"{celulas}{celula_total}{_espacador_td()}{celula_meta}{celula_delta}"
+        f"{_espacador_td()}{celula_ano_anterior}{celula_delta_ano_anterior}</tr>"
     )
     if campo in LINHAS_MARGEM:
         def _td_pct(valor, base) -> str:
@@ -391,22 +411,34 @@ for nome, campo, destaque in LINHAS_DRE_DEF:
             _td_pct(dre_por_mes[mes][campo], dre_por_mes[mes]["receita_liquida"]) for mes in dre_por_mes
         )
         celula_pct_total = _td_pct(dre_total_ano[campo], base_av_ano)
-        pct_meta = meta_total_ano[campo] / meta_total_ano["receita_liquida"] if meta_total_ano["receita_liquida"] else None
+        base_meta = meta_total_ano["receita_liquida"]
+        pct_meta = valor_meta / base_meta if valor_meta is not None and base_meta else None
         pct_forecast = dre_total_ano[campo] / base_av_ano if base_av_ano else None
-        celula_pct_meta = _td_pct(meta_total_ano[campo], meta_total_ano["receita_liquida"])
+        celula_pct_meta = _td_pct(valor_meta, base_meta)
         delta_pp = None if pct_meta is None or pct_forecast is None else pct_forecast - pct_meta
         celula_pct_delta = f"<td style='padding:4px 6px; text-align:right;'>{format_pp(delta_pp)}</td>"
+        base_ano_anterior = dre_ano_anterior_total.get("receita_liquida") if dre_ano_anterior_total else None
+        pct_ano_anterior = (
+            valor_ano_anterior / base_ano_anterior if valor_ano_anterior is not None and base_ano_anterior else None
+        )
+        celula_pct_ano_anterior = _td_pct(valor_ano_anterior, base_ano_anterior)
+        delta_pp_ano_anterior = (
+            None if pct_ano_anterior is None or pct_forecast is None else pct_forecast - pct_ano_anterior
+        )
+        celula_pct_delta_ano_anterior = f"<td style='padding:4px 6px; text-align:right;'>{format_pp(delta_pp_ano_anterior)}</td>"
         linhas_html.append(
             "<tr style='font-style:italic; color:#555; background-color:#F7F9F4;'>"
             f"<td style='padding:4px 10px 4px 20px; position:sticky; left:0; z-index:1; background-color:#F7F9F4;'>{LINHAS_MARGEM[campo]}</td>"
-            f"{celulas_pct}{celula_pct_total}{_espacador_td()}{celula_pct_meta}{celula_pct_delta}</tr>"
+            f"{celulas_pct}{celula_pct_total}{_espacador_td()}{celula_pct_meta}{celula_pct_delta}"
+            f"{_espacador_td()}{celula_pct_ano_anterior}{celula_pct_delta_ano_anterior}</tr>"
         )
 
 cabecalho_meses = "".join(f"<th style='{TH_VALOR}'>{MESES_PT[mes.month]}/{str(mes.year)[2:]}</th>" for mes in dre_por_mes)
 tabela_dre_html = (
     "<table style='width:100%; border-collapse:collapse; font-size:0.8rem; color:#1a1a1a;'>"
     f"<tr><th style='{TH_ROTULO}'>DRE - Superus Engenharia</th>{cabecalho_meses}<th style='{TH_VALOR}'>Total {ano}</th>"
-    f"{_espacador_th()}<th style='{TH_META}'>Meta Otimista</th><th style='{TH_DELTA}'>Δ Forecast-Meta</th></tr>"
+    f"{_espacador_th()}<th style='{TH_META}'>Meta Otimista</th><th style='{TH_DELTA}'>Δ Forecast-Meta</th>"
+    f"{_espacador_th()}<th style='{TH_META}'>Realizado {ano - 1}</th><th style='{TH_DELTA}'>Δ Forecast-Real.{str(ano - 1)[2:]}</th></tr>"
     + "".join(linhas_html)
     + "</table>"
 )
@@ -418,9 +450,11 @@ st.markdown(
 
 st.caption(
     "Os gráficos de histórico 2022-2025 (parte de baixo da página 6) continuam bloqueados — essa "
-    "base só tem 2026. **Meta Otimista/Δ** = DRE anual alvo (META ANO SUPERUS.xlsx, Cenário "
-    "Otimista) pro ano inteiro, só como referência — não entra em nenhum cálculo; Δ = Forecast "
-    "menos Meta."
+    "base só tem 2026. **Meta Otimista/Δ** = Orçado (Cenário Otimista) da Revisão em vigor "
+    f"(**{revisao_atual}**) pro ano inteiro — acompanha automaticamente a Revisão mais recente "
+    "conforme o ano avança; não entra em nenhum cálculo do Forecast; Δ = Forecast menos Meta. "
+    f"**Realizado {ano - 1}/Δ** = DRE fechada de {ano - 1} (RESULTADOS {ano - 1}.xlsx), ano inteiro, "
+    f"só comparativo; Δ = Forecast {ano} menos Realizado {ano - 1}."
 )
 
 # ------------------------------------------------------------------
