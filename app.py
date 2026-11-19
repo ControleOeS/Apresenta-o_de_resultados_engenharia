@@ -35,9 +35,11 @@ from estilo import (
 from formatting import format_brl_compacto, format_brl_md, format_pct, format_pct_av, format_pp
 from exportar_pdf import gerar_pdf, localizar_navegador, porta_do_servidor_atual
 from forecast import (
+    FONTE_FORECAST_DESMOB,
     FONTE_FORECAST_OPORTUNIDADES,
     FONTE_FORECAST_PADRAO,
     FONTES_FORECAST,
+    chaves_desmob,
     dados_forecast_salvo,
     fechar_dre_ano,
     meses_forecast,
@@ -670,6 +672,14 @@ if meses_forecast(df_real, ano):
             "Administrativa/Financeira continuam vindo da Revisão \"em vigor\", igual ao Forecast "
             "normal."
         )
+    elif fonte_forecast == FONTE_FORECAST_DESMOB:
+        st.caption(
+            "Forecast com Desmob = o preenchimento manual do Forecast, mas **considerando a "
+            "desmobilização da Vale Integridade e da Vale Soldadores Itabira** — Receita Bruta/Lucro "
+            "Bruto desses dois Complexos zerados nos meses de Forecast, mais R$1,6 milhão de Custo de "
+            "desmobilização lançado em Dezembro (sem Receita associada). Despesa Administrativa/"
+            "Financeira continuam vindo da Revisão \"em vigor\", igual ao Forecast normal."
+        )
 else:
     fonte_forecast = FONTE_FORECAST_PADRAO
 
@@ -906,19 +916,27 @@ else:
     meses_realizado_app = [m for m in sorted(df_real["Mes"].dropna().unique()) if m.year == ano and m <= ultimo_mes_real_app]
 
     receita_por_linha_mes_app, lucro_por_linha_mes_app, nomes_linha_app = dados_forecast_salvo(meses_fc_app)
+    # "Forecast com Desmob" também usa o preenchimento manual (só exclui os
+    # Complexos desmobilizados) — essas linhas não precisam de Lucro Bruto
+    # preenchido nesse cenário, já que não entram na DRE de qualquer forma.
+    linhas_desmob_app = chaves_desmob(nomes_linha_app) if fonte_forecast == FONTE_FORECAST_DESMOB else set()
     erros_forecast_app = []
     for mes in meses_fc_app:
         chave_mes = mes.strftime("%Y-%m")
+        receita_validar_app = {
+            chave: valor for chave, valor in receita_por_linha_mes_app[chave_mes].items() if chave not in linhas_desmob_app
+        }
         erros_forecast_app += validar_lucro_bruto(
-            receita_por_linha_mes_app[chave_mes], lucro_por_linha_mes_app[chave_mes], nomes_linha_app,
+            receita_validar_app, lucro_por_linha_mes_app[chave_mes], nomes_linha_app,
             f"{MESES_PT[mes.month]}/{str(mes.year)[2:]}",
         )
 
     # Pendência de preenchimento do Forecast manual só bloqueia a DRE
-    # quando a fonte escolhida é o próprio Forecast manual — com "Forecast
-    # de Oportunidades" selecionado, a Receita/Margem Bruta não depende
-    # dele (vem do cenário estático), então a pendência não impede nada.
-    if fonte_forecast == FONTE_FORECAST_PADRAO and erros_forecast_app:
+    # quando a fonte escolhida depende dele (Forecast normal ou com Desmob)
+    # — com "Forecast de Oportunidades" selecionado, a Receita/Margem Bruta
+    # não depende dele (vem do cenário estático), então a pendência não
+    # impede nada.
+    if fonte_forecast != FONTE_FORECAST_OPORTUNIDADES and erros_forecast_app:
         st.warning(
             "⚠️ O Forecast salvo ainda tem pendência de preenchimento — corrija na página **Forecast** "
             "pra essa DRE aparecer aqui:\n\n" + "\n".join(f"- {e}" for e in erros_forecast_app)
@@ -1039,11 +1057,14 @@ else:
             f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'FORECAST {ano} (em R$)', tabela_forecast_html, largura_total=True)}</div>",
             unsafe_allow_html=True,
         )
-        _fonte_forecast_legenda = (
-            "Forecast de Oportunidades (cenário estático à parte)"
-            if fonte_forecast == FONTE_FORECAST_OPORTUNIDADES
-            else "Forecast (preenchido na página **Forecast**)"
-        )
+        _fonte_forecast_legenda = {
+            FONTE_FORECAST_OPORTUNIDADES: "Forecast de Oportunidades (cenário estático à parte)",
+            FONTE_FORECAST_DESMOB: (
+                "Forecast com Desmob (preenchido na página **Forecast**, considerando a "
+                "desmobilização da Vale Integridade e da Vale Soldadores Itabira, com R$1,6 milhão de "
+                "Custo de desmobilização em Dezembro)"
+            ),
+        }.get(fonte_forecast, "Forecast (preenchido na página **Forecast**)")
         st.caption(
             f"Jan-{MESES_PT[meses_realizado_app[-1].month]}/{ano} = Realizado fechado; "
             f"{MESES_PT[meses_fc_app[0].month]}-{MESES_PT[meses_fc_app[-1].month]}/{ano} = "

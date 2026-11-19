@@ -22,12 +22,14 @@ from estilo import VERDE_ESCURO, VERMELHO, render_tabela_com_faixa
 from formatting import format_brl_md, format_pct_av, format_pp
 from forecast import (
     CLASSIFICACAO_FUNIL_VENDAS,
+    FONTE_FORECAST_DESMOB,
     FONTE_FORECAST_OPORTUNIDADES,
     FONTE_FORECAST_PADRAO,
     FONTES_FORECAST,
     LINHAS_RECEITA_SEED,
     carregar_forecast,
     chave_linha,
+    chaves_desmob,
     fechar_dre_ano,
     fechar_linha,
     gerar_excel_export,
@@ -320,6 +322,15 @@ if fonte_forecast == FONTE_FORECAST_OPORTUNIDADES:
         "abaixo enquanto essa opção estiver selecionada. Despesa Administrativa/Financeira "
         "continuam vindo da Revisão \"em vigor\", igual ao Forecast normal."
     )
+elif fonte_forecast == FONTE_FORECAST_DESMOB:
+    st.caption(
+        "Forecast com Desmob = a Receita Bruta Mensal/Lucro Bruto editados acima, mas "
+        "**considerando a desmobilização da Vale Integridade e da Vale Soldadores Itabira** — "
+        "Receita Bruta/Lucro Bruto desses dois Complexos entram zerados na DRE abaixo (o "
+        "preenchimento deles acima continua salvo normalmente), mais R$1,6 milhão de Custo de "
+        "desmobilização lançado em Dezembro (sem Receita associada). Despesa Administrativa/"
+        "Financeira continuam vindo da Revisão \"em vigor\", igual ao Forecast normal."
+    )
 
 # ------------------------------------------------------------------
 # Validação — nenhuma DRE aparece enquanto houver erro (só quando a fonte
@@ -352,12 +363,18 @@ for _, linha in editado_lucro.iterrows():
         valor = linha.get(_rotulo_mes(mes))
         lucro_por_linha_mes[_chave_mes(mes)][chave] = None if pd.isna(valor) else float(valor)
 
+# "Forecast com Desmob" também usa o preenchimento manual (só exclui os
+# Complexos desmobilizados) — essas linhas não precisam de Lucro Bruto
+# preenchido nesse cenário, já que não entram na DRE de qualquer forma.
+linhas_desmob = chaves_desmob(nomes_linha) if fonte_forecast == FONTE_FORECAST_DESMOB else set()
+
 erros = []
 for mes in meses_fc:
     chave_mes = _chave_mes(mes)
-    erros += validar_lucro_bruto(receita_por_linha_mes[chave_mes], lucro_por_linha_mes[chave_mes], nomes_linha, _rotulo_mes(mes))
+    receita_validar = {chave: valor for chave, valor in receita_por_linha_mes[chave_mes].items() if chave not in linhas_desmob}
+    erros += validar_lucro_bruto(receita_validar, lucro_por_linha_mes[chave_mes], nomes_linha, _rotulo_mes(mes))
 
-if erros and fonte_forecast == FONTE_FORECAST_PADRAO:
+if erros and fonte_forecast != FONTE_FORECAST_OPORTUNIDADES:
     st.error("⚠️ A DRE só aparece depois que o Lucro Bruto estiver certo:\n\n" + "\n".join(f"- {e}" for e in erros))
     st.stop()
 
@@ -478,11 +495,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-_fonte_forecast_legenda = (
-    "Forecast de Oportunidades (cenário estático à parte)"
-    if fonte_forecast == FONTE_FORECAST_OPORTUNIDADES
-    else "Forecast (Receita Bruta Mensal/Lucro Bruto editados acima)"
-)
+_fonte_forecast_legenda = {
+    FONTE_FORECAST_OPORTUNIDADES: "Forecast de Oportunidades (cenário estático à parte)",
+    FONTE_FORECAST_DESMOB: (
+        "Forecast com Desmob (Receita Bruta Mensal/Lucro Bruto editados acima, considerando a "
+        "desmobilização da Vale Integridade e da Vale Soldadores Itabira, com R$1,6 milhão de "
+        "Custo de desmobilização em Dezembro)"
+    ),
+}.get(fonte_forecast, "Forecast (Receita Bruta Mensal/Lucro Bruto editados acima)")
 st.caption(
     f"{MESES_PT[meses_fc[0].month]}-{MESES_PT[meses_fc[-1].month]}/{ano} = {_fonte_forecast_legenda}. "
     "Os gráficos de histórico 2022-2025 (parte de baixo da página 6) continuam bloqueados — essa "

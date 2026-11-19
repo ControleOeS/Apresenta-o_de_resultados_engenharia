@@ -47,10 +47,28 @@ IMPOSTO_FORECAST_PCT = 0.10
 # DASH_DIRETORIA. "Forecast" = preenchimento manual salvo (comportamento de
 # sempre, linha a linha, ver dados_forecast_salvo). "Forecast de
 # Oportunidades" = cenário alternativo e estático, sincronizado à parte
-# (ver forecast_oportunidades.py) — pedido do usuário, 2026-11-18.
+# (ver forecast_oportunidades.py) — pedido do usuário, 2026-11-18. "Forecast
+# com Desmob" = o próprio preenchimento manual, mas sem a Receita/Lucro
+# Bruto dos Complexos desmobilizados (ver COMPLEXOS_DESMOB) e com o Custo
+# de desmobilização lançado em Dezembro (ver CUSTO_DESMOB_DEZEMBRO) —
+# pedido do usuário, 2026-11-19.
 FONTE_FORECAST_PADRAO = "Forecast"
 FONTE_FORECAST_OPORTUNIDADES = "Forecast de Oportunidades"
-FONTES_FORECAST = [FONTE_FORECAST_PADRAO, FONTE_FORECAST_OPORTUNIDADES]
+FONTE_FORECAST_DESMOB = "Forecast com Desmob"
+FONTES_FORECAST = [FONTE_FORECAST_PADRAO, FONTE_FORECAST_OPORTUNIDADES, FONTE_FORECAST_DESMOB]
+
+# Complexos que saem do "Forecast com Desmob" (Receita/Lucro Bruto zerados
+# nos meses de Forecast) — pedido do usuário, 2026-11-19: Vale Integridade
+# (SIN01.26013) e Vale Soldadores Itabira (SIN01.25027), ambos em
+# desmobilização. Identificados pelo nome do Complexo na Receita Bruta
+# Mensal (esse Forecast manual não usa código de Centro de Custo — ver
+# chave_linha), não pelo código SIN01 em si.
+COMPLEXOS_DESMOB = ("vale integridade", "vale soldadores itabira")
+
+# Custo de desmobilização lançado em Dezembro no "Forecast com Desmob", sem
+# Receita associada (reduz Custo/Margem Bruta do mês) — pedido do usuário,
+# 2026-11-19.
+CUSTO_DESMOB_DEZEMBRO = 1_600_000.0
 
 # Margem Bruta % padrão pra pré-preencher o Lucro Bruto de uma linha
 # quando ainda não foi salvo nada pra ela — editável livremente depois,
@@ -69,6 +87,22 @@ def imposto_pct_linha(complexo: str) -> float:
     if "indeniza" in (complexo or "").lower():
         return 0.0
     return IMPOSTO_FORECAST_PCT
+
+
+def _complexo_desmobilizado(complexo: str) -> bool:
+    """True se esse Complexo está na lista de desmobilização do "Forecast
+    com Desmob" (ver COMPLEXOS_DESMOB)."""
+    complexo_lower = (complexo or "").lower()
+    return any(termo in complexo_lower for termo in COMPLEXOS_DESMOB)
+
+
+def chaves_desmob(nomes_linha: dict[str, str]) -> set[str]:
+    """Chaves (chave_linha) dos Complexos desmobilizados no "Forecast com
+    Desmob" — usada tanto pra zerar a Receita/Lucro Bruto dessas linhas no
+    fechamento da DRE (fechar_dre_ano) quanto pra não exigir Lucro Bruto
+    preenchido nelas na validação (validar_lucro_bruto), já que não entram
+    nesse cenário de qualquer forma."""
+    return {chave for chave, complexo in nomes_linha.items() if _complexo_desmobilizado(complexo)}
 
 # Linhas da Receita Bruta Mensal, transcritas direto da página 7 da
 # apresentação de referência (jan-dez/26, Cenário Otimista) — mesma
@@ -305,7 +339,11 @@ def fechar_dre_ano(
     Oportunidades") usa o total mensal estático de
     forecast_oportunidades.carregar_forecast_oportunidades() — mês sem
     linha nessa fonte (arquivo ainda não sincronizado) fecha com Receita/
-    Margem Bruta zeradas, nunca quebra."""
+    Margem Bruta zeradas, nunca quebra; FONTE_FORECAST_DESMOB ("Forecast
+    com Desmob") soma as mesmas linhas do preenchimento manual, mas exclui
+    as dos Complexos em COMPLEXOS_DESMOB (Receita/Lucro Bruto zerados pra
+    elas) e desconta CUSTO_DESMOB_DEZEMBRO do Custo/Margem Bruta de
+    Dezembro."""
     dre_por_mes = {}
     for mes in meses_realizado:
         dre_por_mes[mes] = calcular_dre(df_real[df_real["Mes"] == mes])
@@ -314,6 +352,7 @@ def fechar_dre_ano(
     oportunidades_por_mes = None
     if fonte_forecast == FONTE_FORECAST_OPORTUNIDADES:
         oportunidades_por_mes = carregar_forecast_oportunidades().set_index("Mes")
+    linhas_desmob = chaves_desmob(nomes_linha) if fonte_forecast == FONTE_FORECAST_DESMOB else set()
 
     for mes in meses_fc:
         if oportunidades_por_mes is not None:
@@ -327,8 +366,12 @@ def fechar_dre_ano(
             linhas_receita_lucro = [
                 (receita_bruta, lucro_por_linha_mes[chave_mes].get(chave) or 0.0, imposto_pct_linha(nomes_linha.get(chave)))
                 for chave, receita_bruta in receita_por_linha_mes[chave_mes].items()
+                if chave not in linhas_desmob
             ]
             dre_mes = calcular_dre_forecast_mes(linhas_receita_lucro)
+            if fonte_forecast == FONTE_FORECAST_DESMOB and mes.month == 12:
+                dre_mes["custo"] -= CUSTO_DESMOB_DEZEMBRO
+                dre_mes["margem_bruta"] -= CUSTO_DESMOB_DEZEMBRO
         despesa = despesa_dre_mes(df_previsto, df_refinado, df_real, revisao_atual, mes)
         dre_mes["despesa_adm"] = despesa["despesa_adm"]
         dre_mes["ebitda"] = dre_mes["margem_bruta"] + despesa["despesa_adm"]
