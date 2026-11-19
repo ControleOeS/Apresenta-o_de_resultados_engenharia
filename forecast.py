@@ -216,15 +216,17 @@ def salvar_forecast(dado: dict) -> None:
 
 
 def despesa_dre_mes(
-    df_previsto: pd.DataFrame, df_refinado: pd.DataFrame, df_real: pd.DataFrame, revisao: str, mes: pd.Timestamp
+    df_previsto: pd.DataFrame, df_refinado: pd.DataFrame, df_real_despesa: pd.DataFrame, revisao: str, mes: pd.Timestamp
 ) -> dict:
     """Despesa Administrativa/Financeira/Imposto de Renda do mês, vindas da
     Revisão "em vigor" (revisao_atual_forecast) — mesma cascata usada no
     resto do app (calcular_previsto_com_fallback_despesa): meses fora da
     janela de previsão da própria Revisão espelham o Realizado (Δ=0), meses
     dentro da janela usam a Despesa própria da Revisão (REV02/REV03) ou a
-    cascata cheia (REV00/REV01)."""
-    totais, _ = calcular_previsto_com_fallback_despesa(df_previsto, df_refinado, revisao, CENARIO_FORECAST, mes, mes, df_real)
+    cascata cheia (REV00/REV01). `df_real_despesa` é sempre o Realizado
+    SEM o filtro de Centro de Custo (o Orçado não tem granularidade de CC
+    — ver fechar_dre_ano)."""
+    totais, _ = calcular_previsto_com_fallback_despesa(df_previsto, df_refinado, revisao, CENARIO_FORECAST, mes, mes, df_real_despesa)
     totais = totais or {}
     return {
         "despesa_adm": totais.get("despesa_adm") or 0.0,
@@ -324,6 +326,7 @@ def fechar_dre_ano(
     lucro_por_linha_mes: dict,
     nomes_linha: dict,
     fonte_forecast: str = FONTE_FORECAST_PADRAO,
+    df_real_despesa: pd.DataFrame | None = None,
 ) -> dict[pd.Timestamp, dict]:
     """DRE completa do ano: Realizado (meses_realizado, direto do Realizado
     fechado) + Forecast (meses_fc, Despesa sempre da Revisão em vigor) —
@@ -343,7 +346,17 @@ def fechar_dre_ano(
     com Desmob") soma as mesmas linhas do preenchimento manual, mas exclui
     as dos Complexos em COMPLEXOS_DESMOB (Receita/Lucro Bruto zerados pra
     elas) e desconta CUSTO_DESMOB_DEZEMBRO do Custo/Margem Bruta de
-    Dezembro."""
+    Dezembro.
+
+    `df_real` fecha os meses de Realizado (pode vir filtrado por Centro de
+    Custo — ver filtro da página principal, app.py); `df_real_despesa`
+    (default: o próprio `df_real`) é o Realizado usado só internamente pela
+    Despesa do Forecast (despesa_dre_mes -> calcular_previsto_com_fallback_despesa),
+    que precisa ficar SEMPRE sem esse filtro — o Orçado não tem
+    granularidade de Centro de Custo, então misturar um `df_real` filtrado
+    ali inflaria/reduziria a Despesa "espelhada" de forma inconsistente com
+    o resto do Orçado."""
+    df_real_despesa = df_real if df_real_despesa is None else df_real_despesa
     dre_por_mes = {}
     for mes in meses_realizado:
         dre_por_mes[mes] = calcular_dre(df_real[df_real["Mes"] == mes])
@@ -372,7 +385,7 @@ def fechar_dre_ano(
             if fonte_forecast == FONTE_FORECAST_DESMOB and mes.month == 12:
                 dre_mes["custo"] -= CUSTO_DESMOB_DEZEMBRO
                 dre_mes["margem_bruta"] -= CUSTO_DESMOB_DEZEMBRO
-        despesa = despesa_dre_mes(df_previsto, df_refinado, df_real, revisao_atual, mes)
+        despesa = despesa_dre_mes(df_previsto, df_refinado, df_real_despesa, revisao_atual, mes)
         dre_mes["despesa_adm"] = despesa["despesa_adm"]
         dre_mes["ebitda"] = dre_mes["margem_bruta"] + despesa["despesa_adm"]
         dre_mes["despesa_financeira"] = despesa["despesa_financeira"]

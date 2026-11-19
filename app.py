@@ -16,6 +16,7 @@ from dados import (
     carregar_refinado_detalhado,
     dre_2025_periodo,
     last_update,
+    mapear_nomes_centro_custo,
     MESES_SUBSTITUIR_POR_REV,
     mes_corte_revisao,
     previsto_mensal_ano,
@@ -120,6 +121,7 @@ df_previsto = carregar_previsto()
 df_refinado = carregar_previsto_refinado()
 df_refinado_detalhado = carregar_refinado_detalhado()
 tabela_dimensao = tabela_dimensao_centro_de_custo()
+nomes_centro_custo = mapear_nomes_centro_custo(df_real)
 
 with st.sidebar:
     st.header("Filtros")
@@ -149,6 +151,19 @@ with st.sidebar:
         indice_revisao_padrao = revisoes.index(revisao_param)
     revisao_sel = st.selectbox("Revisão", revisoes, index=indice_revisao_padrao)
     cenario_sel = "Otimista"
+
+    # Mesmo modelo/rótulo do filtro já existente no DASH_DIRETORIA — pedido
+    # do usuário, 2026-11-19. Sem seleção (padrão) = sem filtro, mostra
+    # tudo. Só filtra o Realizado (KPIs, DRE Mês/Acumulado, Curva S, DRE
+    # Forecast, Análise por Categoria/CC, Análise de Complexos) — o
+    # Orçado/Previsto não tem granularidade de Centro de Custo (mesma
+    # limitação de lá: Δ Real-vs-Orçado com filtro ativo compara Real
+    # filtrado contra Orçado total).
+    centros_custo = sorted(df_real["Cod. Centro de Custo"].dropna().unique().tolist())
+    centros_custo_sel = st.multiselect(
+        "Cod. Centro de Custo", centros_custo,
+        format_func=lambda c: f"{c} — {nomes_centro_custo[c]}" if nomes_centro_custo.get(c) else c,
+    )
 
     with st.expander("ℹ️ Qual Revisão escolher?"):
         st.caption(
@@ -211,6 +226,17 @@ ano = mes_ref.year
 mes_ini_ano = pd.Timestamp(year=ano, month=1, day=1)
 nome_mes = MESES_PT[mes_ref.month].upper()
 
+# df_real_filtrado = o que o filtro "Cod. Centro de Custo" da barra lateral
+# realmente filtra — todo o Realizado exibido daqui pra baixo (KPIs, DRE
+# Mês/Acumulado, Curva S, DRE Forecast, Análise por Categoria/CC, Análise
+# de Complexos). df_real (sem filtro) continua usado pra decidir limites de
+# data/Revisão (último mês fechado, janela de Forecast, Revisão "em
+# vigor") e como fallback interno do Orçado (calcular_previsto_com_fallback_despesa/
+# previsto_mensal_ano/despesa_dre_mes) — o Orçado não tem granularidade de
+# Centro de Custo, então ele nunca encolhe com esse filtro, igual ao
+# DASH_DIRETORIA.
+df_real_filtrado = df_real[df_real["Cod. Centro de Custo"].isin(centros_custo_sel)] if centros_custo_sel else df_real
+
 st.markdown(
     render_banner(
         "APRESENTAÇÃO DE RESULTADOS",
@@ -223,9 +249,15 @@ st.caption(
     f"Dados atualizados em {last_update()} · último mês com Realizado fechado: "
     f"{MESES_PT[_ultimo_mes_real.month]}/{_ultimo_mes_real.year}"
 )
+if centros_custo_sel:
+    st.caption(
+        f"🔎 Filtro de Centro de Custo ativo ({len(centros_custo_sel)} selecionado"
+        f"{'s' if len(centros_custo_sel) != 1 else ''}) — afeta só o Realizado; o Orçado/Previsto "
+        "não tem granularidade de Centro de Custo e continua no total."
+    )
 
-dre_mes_real = calcular_dre(df_real[df_real["Mes"] == mes_ref])
-dre_acum_real = calcular_dre(df_real[(df_real["Mes"] >= mes_ini_ano) & (df_real["Mes"] <= mes_ref)])
+dre_mes_real = calcular_dre(df_real_filtrado[df_real_filtrado["Mes"] == mes_ref])
+dre_acum_real = calcular_dre(df_real_filtrado[(df_real_filtrado["Mes"] >= mes_ini_ano) & (df_real_filtrado["Mes"] <= mes_ref)])
 
 realizado_2025_mensal = carregar_realizado_2025_mensal()
 dre_mes_2025 = dre_2025_periodo(realizado_2025_mensal, mes_ref, mes_ref)
@@ -530,7 +562,7 @@ st.markdown(
 
 # --- Tabela do Acumulado (com detalhamento mês a mês do Realizado) --
 meses_do_ano = [m for m in sorted(df_real["Mes"].dropna().unique()) if m.year == ano and m <= mes_ref]
-dre_por_mes = {m: calcular_dre(df_real[df_real["Mes"] == m]) for m in meses_do_ano}
+dre_por_mes = {m: calcular_dre(df_real_filtrado[df_real_filtrado["Mes"] == m]) for m in meses_do_ano}
 
 linhas_acum_html = []
 for nome, campo, destaque in LINHAS_DRE_DEF:
@@ -869,20 +901,20 @@ if base_curva_s_sel == "Forecast":
     meses_fc_cs = meses_forecast(df_real, ano)
     if not meses_fc_cs:
         # Ano já fechado inteiro no Realizado — nada de Forecast pra misturar.
-        df_real_mensal_cs = calcular_dre_por_mes(df_real[df_real["Mes"].dt.year == ano])
+        df_real_mensal_cs = calcular_dre_por_mes(df_real_filtrado[df_real_filtrado["Mes"].dt.year == ano])
     else:
         revisao_atual_forecast_cs = revisao_atual_forecast(df_real, revisoes, ano)
         meses_realizado_cs = sorted(m for m in df_real["Mes"].dropna().unique() if pd.Timestamp(m).year == ano)
         receita_por_linha_mes_cs, lucro_por_linha_mes_cs, nomes_linha_cs = dados_forecast_salvo(meses_fc_cs)
         dre_por_mes_cs = fechar_dre_ano(
-            df_real, df_previsto, df_refinado, revisao_atual_forecast_cs,
+            df_real_filtrado, df_previsto, df_refinado, revisao_atual_forecast_cs,
             meses_realizado_cs, meses_fc_cs, receita_por_linha_mes_cs, lucro_por_linha_mes_cs, nomes_linha_cs,
-            fonte_forecast=fonte_forecast,
+            fonte_forecast=fonte_forecast, df_real_despesa=df_real,
         )
         df_real_mensal_cs = pd.DataFrame([dict(dre, Mes=mes) for mes, dre in dre_por_mes_cs.items()])
     nome_real_cs = "Realizado + Forecast"
 else:
-    df_real_mensal_cs = calcular_dre_por_mes(df_real[(df_real["Mes"].dt.year == ano) & (df_real["Mes"] <= mes_ref)])
+    df_real_mensal_cs = calcular_dre_por_mes(df_real_filtrado[(df_real_filtrado["Mes"].dt.year == ano) & (df_real_filtrado["Mes"] <= mes_ref)])
     nome_real_cs = "Realizado"
 
 df_orc_mensal_moderado_cs = previsto_mensal_ano(df_previsto, df_refinado, df_real, revisao_sel, "Moderado", ano)
@@ -943,9 +975,9 @@ else:
         )
     else:
         dre_forecast_por_mes = fechar_dre_ano(
-            df_real, df_previsto, df_refinado, revisao_atual_forecast_app,
+            df_real_filtrado, df_previsto, df_refinado, revisao_atual_forecast_app,
             meses_realizado_app, meses_fc_app, receita_por_linha_mes_app, lucro_por_linha_mes_app, nomes_linha_app,
-            fonte_forecast=fonte_forecast,
+            fonte_forecast=fonte_forecast, df_real_despesa=df_real,
         )
         dre_forecast_total_ano = {campo: sum(dre_forecast_por_mes[m][campo] for m in dre_forecast_por_mes) for _, campo, _ in LINHAS_DRE_DEF}
         base_av_forecast_ano = dre_forecast_total_ano["receita_liquida"]
@@ -1091,8 +1123,8 @@ st.caption(
 )
 
 
-receita_real_mes_cat = receita_por_categoria_realizado(df_real, mes_ref, mes_ref)
-receita_real_acum_cat = receita_por_categoria_realizado(df_real, mes_ini_ano, mes_ref)
+receita_real_mes_cat = receita_por_categoria_realizado(df_real_filtrado, mes_ref, mes_ref)
+receita_real_acum_cat = receita_por_categoria_realizado(df_real_filtrado, mes_ini_ano, mes_ref)
 receita_orc_mes_cat = receita_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
 receita_orc_acum_cat = receita_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 
@@ -1311,8 +1343,8 @@ col_rec_acum.markdown(
     ),
     unsafe_allow_html=True,
 )
-receita_detalhe_real_mes = receita_por_cc_realizado(df_real, mes_ref, mes_ref)
-receita_detalhe_real_acum = receita_por_cc_realizado(df_real, mes_ini_ano, mes_ref)
+receita_detalhe_real_mes = receita_por_cc_realizado(df_real_filtrado, mes_ref, mes_ref)
+receita_detalhe_real_acum = receita_por_cc_realizado(df_real_filtrado, mes_ini_ano, mes_ref)
 receita_detalhe_orc_mes = receita_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ref, mes_ref)
 receita_detalhe_orc_acum = receita_por_cc_previsto(df_previsto, df_refinado_detalhado, df_real, tabela_dimensao, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 
@@ -1338,12 +1370,12 @@ def _combinar_detalhe(a, b):
 
 # Lucro Bruto = Receita Líquida (Bruta + Imposto) + Custo — mesma definição
 # da DRE (margem_bruta), não só Receita Bruta + Custo.
-custo_real_mes_cat = custo_por_categoria_realizado(df_real, mes_ref, mes_ref)
-custo_real_acum_cat = custo_por_categoria_realizado(df_real, mes_ini_ano, mes_ref)
+custo_real_mes_cat = custo_por_categoria_realizado(df_real_filtrado, mes_ref, mes_ref)
+custo_real_acum_cat = custo_por_categoria_realizado(df_real_filtrado, mes_ini_ano, mes_ref)
 custo_orc_mes_cat = custo_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
 custo_orc_acum_cat = custo_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
-imposto_real_mes_cat = imposto_por_categoria_realizado(df_real, mes_ref, mes_ref)
-imposto_real_acum_cat = imposto_por_categoria_realizado(df_real, mes_ini_ano, mes_ref)
+imposto_real_mes_cat = imposto_por_categoria_realizado(df_real_filtrado, mes_ref, mes_ref)
+imposto_real_acum_cat = imposto_por_categoria_realizado(df_real_filtrado, mes_ini_ano, mes_ref)
 imposto_orc_mes_cat = imposto_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
 imposto_orc_acum_cat = imposto_por_categoria_previsto(df_previsto, df_refinado_detalhado, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 
@@ -1390,12 +1422,12 @@ col_lb_acum.markdown(
 )
 
 lucro_detalhe_real_mes = _combinar_detalhe(
-    _combinar_detalhe(receita_detalhe_real_mes, imposto_por_cc_realizado(df_real, mes_ref, mes_ref)),
-    custo_por_cc_realizado(df_real, mes_ref, mes_ref),
+    _combinar_detalhe(receita_detalhe_real_mes, imposto_por_cc_realizado(df_real_filtrado, mes_ref, mes_ref)),
+    custo_por_cc_realizado(df_real_filtrado, mes_ref, mes_ref),
 )
 lucro_detalhe_real_acum = _combinar_detalhe(
-    _combinar_detalhe(receita_detalhe_real_acum, imposto_por_cc_realizado(df_real, mes_ini_ano, mes_ref)),
-    custo_por_cc_realizado(df_real, mes_ini_ano, mes_ref),
+    _combinar_detalhe(receita_detalhe_real_acum, imposto_por_cc_realizado(df_real_filtrado, mes_ini_ano, mes_ref)),
+    custo_por_cc_realizado(df_real_filtrado, mes_ini_ano, mes_ref),
 )
 lucro_detalhe_orc_mes = _combinar_detalhe(
     _combinar_detalhe(
@@ -1420,8 +1452,8 @@ with st.expander("Ver valores em tabela (Lucro Bruto por Categoria)"):
 
 # Despesa vem negativa (convenção "dedução = negativo") — inverte pra mostrar
 # magnitude positiva (igual à apresentação de referência).
-despesa_real_mes_cat = -despesa_por_categoria_realizado(df_real, mes_ref, mes_ref)
-despesa_real_acum_cat = -despesa_por_categoria_realizado(df_real, mes_ini_ano, mes_ref)
+despesa_real_mes_cat = -despesa_por_categoria_realizado(df_real_filtrado, mes_ref, mes_ref)
+despesa_real_acum_cat = -despesa_por_categoria_realizado(df_real_filtrado, mes_ini_ano, mes_ref)
 despesa_orc_mes_cat = despesa_por_categoria_previsto(df_previsto, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
 despesa_orc_acum_cat = despesa_por_categoria_previsto(df_previsto, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 if despesa_orc_mes_cat is not None:
@@ -1472,8 +1504,8 @@ col_desp_acum.markdown(
     ),
     unsafe_allow_html=True,
 )
-despesa_detalhe_real_mes = despesa_por_cc_realizado(df_real, mes_ref, mes_ref).assign(Valor=lambda d: -d["Valor"])
-despesa_detalhe_real_acum = despesa_por_cc_realizado(df_real, mes_ini_ano, mes_ref).assign(Valor=lambda d: -d["Valor"])
+despesa_detalhe_real_mes = despesa_por_cc_realizado(df_real_filtrado, mes_ref, mes_ref).assign(Valor=lambda d: -d["Valor"])
+despesa_detalhe_real_acum = despesa_por_cc_realizado(df_real_filtrado, mes_ini_ano, mes_ref).assign(Valor=lambda d: -d["Valor"])
 despesa_detalhe_orc_mes = despesa_por_cc_previsto(df_previsto, df_real, revisao_sel, cenario_sel, mes_ref, mes_ref)
 despesa_detalhe_orc_acum = despesa_por_cc_previsto(df_previsto, df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref)
 if despesa_detalhe_orc_mes is not None:
@@ -1498,7 +1530,7 @@ st.markdown("<div class='quebra-pagina'></div>", unsafe_allow_html=True)
 st.header("Análise de Complexos")
 
 analise_cpx = construir_analise_complexos(
-    df_real, df_refinado_detalhado, tabela_dimensao, mes_ref, mes_ini_ano, revisao_sel, cenario_sel
+    df_real_filtrado, df_refinado_detalhado, tabela_dimensao, mes_ref, mes_ini_ano, revisao_sel, cenario_sel
 )
 status_cpx = analise_cpx.status_todos()
 st.caption(f"Cobre todo Centro de Custo que já apareceu em Receita Bruta (Realizado ou Orçado) — {len(status_cpx)} ao todo.")

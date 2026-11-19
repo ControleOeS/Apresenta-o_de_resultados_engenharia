@@ -38,6 +38,21 @@ def normalizar_codigo_cc(codigo):
     return _RE_PREFIXO_SIN_REG.sub(r"\g<1>01\2", codigo)
 
 
+def mapear_nomes_centro_custo(df: pd.DataFrame) -> dict:
+    """Cod. Centro de Custo -> nome (coluna "Centro de Custo" do Realizado),
+    usado só pra rótulo do filtro "Cod. Centro de Custo" (concatenado com o
+    código). O nome às vezes varia ao longo do tempo pro mesmo código
+    (renomeação de obra, diferença de grafia/espaço) — usa o mais recente
+    (maior Mes) como critério objetivo, não um palpite entre as variantes.
+    Duplicado do mesmo helper do DASH_DIRETORIA (data_loader.py), pedido do
+    usuário, 2026-11-19."""
+    sub = df[["Mes", "Cod. Centro de Custo", "Centro de Custo"]].copy()
+    sub["Centro de Custo"] = sub["Centro de Custo"].astype(str).str.strip()
+    sub = sub[~sub["Centro de Custo"].isin(["", "nan", "None"])]
+    sub = sub.sort_values("Mes")
+    return sub.groupby("Cod. Centro de Custo")["Centro de Custo"].last().to_dict()
+
+
 MESES_COLUNA = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 MES_NUMERO = {nome: i + 1 for i, nome in enumerate(MESES_COLUNA)}
 MESES_PT = {1: "Jan", 2: "Fev", 3: "Mar", 4: "Abr", 5: "Mai", 6: "Jun", 7: "Jul", 8: "Ago", 9: "Set", 10: "Out", 11: "Nov", 12: "Dez"}
