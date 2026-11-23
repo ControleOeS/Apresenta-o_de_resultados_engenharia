@@ -35,9 +35,13 @@ def pagina_superus() -> None:
 
 
 def pagina_asap() -> None:
-    tab_resultado, tab_forecast = st.tabs(["Resultado", "Forecast"])
+    tab_resultado, tab_classificar_cc, tab_forecast = st.tabs(
+        ["Resultado", "Classificar Centro de Custo", "Forecast"]
+    )
     with tab_resultado:
         pagina_resultado_asap.render()
+    with tab_classificar_cc:
+        pagina_classificar_cc.render()
     with tab_forecast:
         pagina_forecast_asap.render()
 
