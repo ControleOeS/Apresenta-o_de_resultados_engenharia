@@ -13,7 +13,9 @@ from classificacoes import (
     remover_categoria,
     salvar_classificacoes,
 )
-from dados import carregar_previsto, carregar_realizado_superus, carregar_refinado_detalhado, tabela_dimensao_centro_de_custo
+from config import COLIGADAS_GRUPO, COLIGADAS_OES
+from dados import carregar_previsto, carregar_realizado_por_coligadas, carregar_refinado_detalhado, tabela_dimensao_centro_de_custo
+from previsto_asap import carregar_previsto_asap
 
 
 def render() -> None:
@@ -61,8 +63,13 @@ def render() -> None:
 
     st.divider()
 
-    df_real = carregar_realizado_superus()
+    # Universo ampliado pra Superus + ASAP + O&S (pedido do usuário,
+    # 2026-11-24, junto com a adição das novas seções) — é uma base de
+    # classificação só, compartilhada entre todos os segmentos (Centro de
+    # Custo não se repete entre Coligadas diferentes).
+    df_real = carregar_realizado_por_coligadas(COLIGADAS_GRUPO + COLIGADAS_OES)
     df_previsto = carregar_previsto()
+    df_previsto_asap = carregar_previsto_asap()
     df_refinado_detalhado = carregar_refinado_detalhado()
     tabela_dimensao = tabela_dimensao_centro_de_custo()
 
@@ -73,6 +80,10 @@ def render() -> None:
     prevs = df_previsto[["CC", "Centro de Custo"]].dropna().copy()
     prevs.columns = ["codigo", "nome"]
     prevs["codigo"] = prevs["codigo"].astype(str)
+
+    prevs_asap = df_previsto_asap[["CC", "Centro de Custo"]].dropna().copy()
+    prevs_asap.columns = ["codigo", "nome"]
+    prevs_asap["codigo"] = prevs_asap["codigo"].astype(str)
 
     # Orçado da REV02/REV03 (Refinado Engenharias) não tinha entrada aqui — só
     # Realizado + Previsto "antigo" (REV00/REV01) — por isso códigos que só
@@ -88,7 +99,7 @@ def render() -> None:
     refinados["nome"] = refinados["codigo"].map(mapa_nomes_dimensao).fillna(refinados["codigo"])
 
     todos = (
-        pd.concat([reais, prevs, refinados], ignore_index=True)
+        pd.concat([reais, prevs, prevs_asap, refinados], ignore_index=True)
         .drop_duplicates(subset="codigo")
         .sort_values("nome")
         .reset_index(drop=True)

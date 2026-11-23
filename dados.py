@@ -163,6 +163,26 @@ def _ler_realizado(_token: str, cache_key: str) -> pd.DataFrame:
     df = pd.read_excel(BytesIO(content), sheet_name="Planilha1", engine="calamine")
     df["Mes"] = df["Data"].values.astype("datetime64[M]")
     df["Cod. Centro de Custo"] = df["Cod. Centro de Custo"].map(normalizar_codigo_cc)
+
+    # Depreciação/Amortização e alguns lançamentos de ajuste da ASAP (Coligada
+    # 14) vêm classificados como Nível 1 = 6 (Despesa Administrativa) na base
+    # de origem, mas deveriam ser Nível 1 = 8 ("Outros Itens não
+    # Operacionais") — mesma correção já aplicada no DASH_DIRETORIA
+    # (data_loader.py, confirmada pelo usuário em 2026-11-04 comparando com o
+    # relatório oficial da ASAP). Restrita a essas contas/Coligada — não
+    # muda nada da Superus (Coligadas 2/16/18), portado em 2026-11-24 junto
+    # com a adição da ASAP neste app.
+    _mascara_dep_amort_asap = (
+        (df["Coligada"] == 14) & (df["Nível 1"] == 6) & (df["Descrição Conta"].isin(["DEPRECIAÇÕES", "AMORTIZAÇÕES"]))
+    )
+    df.loc[_mascara_dep_amort_asap, "Nível 1"] = 8
+    _mascara_outros_asap = (
+        (df["Coligada"] == 14)
+        & (df["Nível 1"] == 6)
+        & (df["Descrição Conta"].isin(["PIS E COFINS SOBRE ENTRADAS", "AJUSTE CONTÁBIL", "RECEITA DE BONIFICAÇÃO"]))
+    )
+    df.loc[_mascara_outros_asap, "Nível 1"] = 8
+
     return df
 
 
@@ -171,9 +191,16 @@ def carregar_realizado() -> pd.DataFrame:
     return _ler_realizado(token, rev)
 
 
-def carregar_realizado_superus() -> pd.DataFrame:
+def carregar_realizado_por_coligadas(coligadas: list[int]) -> pd.DataFrame:
+    """Realizado filtrado por uma lista de Coligada — generalização de
+    carregar_realizado_superus() pra também servir ASAP/O&S/Grupo (pedido do
+    usuário, 2026-11-24)."""
     df = carregar_realizado()
-    return df[df["Coligada"].isin(COLIGADAS_SUPERUS)]
+    return df[df["Coligada"].isin(coligadas)]
+
+
+def carregar_realizado_superus() -> pd.DataFrame:
+    return carregar_realizado_por_coligadas(COLIGADAS_SUPERUS)
 
 
 @st.cache_data(ttl=60, show_spinner=False)

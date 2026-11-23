@@ -76,6 +76,7 @@ from analise_categoria import (
     todas_categorias_conhecidas,
 )
 from graficos_categoria import grafico_categoria_empilhado, mapa_cores_categorias
+from resultado_comum import renderizar_dre_mes_e_acumulado, renderizar_kpis
 
 
 def render() -> None:
@@ -295,361 +296,35 @@ def render() -> None:
     # ------------------------------------------------------------------
     # KPIs
     # ------------------------------------------------------------------
-    st.header("KPIs")
-
-
-    def _variacao_pct(real, orc):
-        if real is None or orc is None or not orc:
-            return None
-        return (real - orc) / abs(orc)
-
-
-    def _grafico_kpi(nome: str, campo: str, campo_margem_base: str | None = None) -> tuple[go.Figure, str]:
-        rotulos = ["Mês Orç.", "Mês Real.", "Acum. Orç.", "Acum. Real."]
-        valores = [dre_mes_orc.get(campo), dre_mes_real.get(campo), dre_acum_orc.get(campo), dre_acum_real.get(campo)]
-        cores = [VERDE_ORCADO, VERDE_ESCURO, VERDE_ORCADO, VERDE_ESCURO]
-        textos = [format_brl_compacto(v) for v in valores]
-        cores_texto = [VERMELHO if (v or 0) < 0 else "#1A1A1A" for v in valores]
-
-        var_mes = _variacao_pct(dre_mes_real.get(campo), dre_mes_orc.get(campo))
-        var_acum = _variacao_pct(dre_acum_real.get(campo), dre_acum_orc.get(campo))
-
-        valores_validos = [v for v in valores if v is not None]
-        maior = max(valores_validos) if valores_validos else 0
-        menor = min(valores_validos) if valores_validos else 0
-        # Folga proporcional ao alcance total do gráfico (não ao valor da própria
-        # barra) — senão uma barra negativa minúscula perto de barras grandes
-        # ganha uma margem ínfima e o rótulo cola no eixo X. O eixo sempre
-        # inclui o zero dos dois lados (max(maior,0)/min(menor,0)) — antes só
-        # a base tinha essa blindagem; com as 4 barras negativas (item 3), o
-        # topo nunca chegava no zero (eixo "pendurado") e o alcance virava só
-        # a diferença entre as 4 barras (às vezes ~100 num valor de milhões),
-        # fazendo os ticks repetirem o mesmo texto arredondado.
-        alcance = max(maior, 0) - min(menor, 0) or abs(maior) or 1
-        y_topo = max(maior, 0) + alcance * 0.22
-        y_base = min(menor, 0) - alcance * 0.18
-
-        fig = go.Figure(
-            go.Bar(
-                x=rotulos,
-                y=valores,
-                marker_color=cores,
-                text=textos,
-                textposition="outside",
-                textfont=dict(color=cores_texto, size=13, weight=700),
-                cliponaxis=False,
-            )
-        )
-
-        anotacoes = []
-        for var, x_real, x_orc in [(var_mes, "Mês Real.", "Mês Orç."), (var_acum, "Acum. Real.", "Acum. Orç.")]:
-            if var is None:
-                continue
-            # Seta já indica a direção — sinal "+"/"-" junto é redundante (item
-            # 17). Variação que arredonda pra 0,0% (ex.: Orçado espelhando
-            # Realizado fora da janela da Revisão, item 6) fica neutra, sem
-            # seta nem cor — "▲ +0.0%" verde era enganoso.
-            if round(var, 3) == 0:
-                cor_var = "#555555"
-                texto_var = "0,0%"
-            else:
-                cor_var = VERMELHO if var < 0 else "#1C7C3E"
-                texto_var = f"{'▲' if var >= 0 else '▼'} {abs(var) * 100:.1f}%".replace(".", ",")
-            anotacoes.append(
-                dict(
-                    x=x_real,
-                    y=y_topo,
-                    text=texto_var,
-                    showarrow=False,
-                    font=dict(color=cor_var, size=13, weight=700),
-                )
-            )
-
-        fig.update_layout(
-            title=dict(text=nome, font=dict(size=16, color="#1A1A1A")),
-            height=380,
-            separators=",.",
-            margin=dict(t=70, b=40),
-            xaxis=dict(
-                tickfont=dict(size=12, color="#1A1A1A", weight=600),
-                showgrid=False,
-            ),
-            yaxis=dict(
-                title=dict(text="Valor", font=dict(size=12, color="#444")),
-                tickformat=",.2s",
-                tickfont=dict(size=11, color="#444"),
-                gridcolor="#E8E8E4",
-                zerolinecolor="#CCCCCC",
-                range=[y_base, y_topo],
-            ),
-            plot_bgcolor="#FFFFFF",
-            paper_bgcolor="#FFFFFF",
-            showlegend=False,
-            annotations=anotacoes,
-        )
-
-        legenda_margem = ""
-        if campo_margem_base:
-            base_mes_orc, base_mes_real = dre_mes_orc.get(campo_margem_base), dre_mes_real.get(campo_margem_base)
-            base_acum_orc, base_acum_real = dre_acum_orc.get(campo_margem_base), dre_acum_real.get(campo_margem_base)
-            m1 = format_pct_av(dre_mes_orc.get(campo), base_mes_orc, manter_sinal=True)
-            m2 = format_pct_av(dre_mes_real.get(campo), base_mes_real, manter_sinal=True)
-            m3 = format_pct_av(dre_acum_orc.get(campo), base_acum_orc, manter_sinal=True)
-            m4 = format_pct_av(dre_acum_real.get(campo), base_acum_real, manter_sinal=True)
-            legenda_margem = f"Margem — Mês Orç. {m1} · Mês Real. {m2} · Acum. Orç. {m3} · Acum. Real. {m4}"
-
-        return fig, legenda_margem
-
-
-    c1, c2 = st.columns(2)
-    fig, _ = _grafico_kpi("Receita Bruta (em R$)", "receita_bruta")
-    c1.plotly_chart(fig, use_container_width=True)
-    fig, legenda = _grafico_kpi("Lucro Bruto (em R$)", "margem_bruta", campo_margem_base="receita_liquida")
-    c2.plotly_chart(fig, use_container_width=True)
-    if legenda:
-        c2.caption(legenda)
-
-    c3, c4 = st.columns(2)
-    fig, legenda = _grafico_kpi("EBITDA (em R$)", "ebitda", campo_margem_base="receita_liquida")
-    c3.plotly_chart(fig, use_container_width=True)
-    if legenda:
-        c3.caption(legenda)
-    fig, legenda = _grafico_kpi("LAIR (em R$)", "lair", campo_margem_base="receita_liquida")
-    c4.plotly_chart(fig, use_container_width=True)
-    if legenda:
-        c4.caption(legenda)
+    renderizar_kpis(dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc)
 
     st.divider()
 
     # ------------------------------------------------------------------
-    # DRE — Mês e Acumulado (duas tabelas empilhadas, faixa lateral verde,
-    # grupos de coluna verde-escuro para valores reportados / cinza para
-    # colunas derivadas, mês a mês no Acumulado — fiel à página 5 da
-    # apresentação de referência, incluindo "Realizado 2025"/"25x26" (fonte:
-    # RESULTADOS 2025.xlsx, ver carregar_realizado_2025_mensal em dados.py).
+    # DRE — Mês e Acumulado (renderização compartilhada com ASAP/O&S/Grupo,
+    # ver resultado_comum.py — inclui "Realizado 2025"/"25x26" (fonte:
+    # RESULTADOS 2025.xlsx, ver carregar_realizado_2025_mensal em dados.py),
+    # exclusivo da Superus por enquanto.
     # ------------------------------------------------------------------
     st.markdown("<div class='quebra-pagina'></div>", unsafe_allow_html=True)
-    st.header("DRE — Mês e Acumulado")
 
-    # Cada coluna usa a Receita Líquida DELA MESMA como base do A.V.% — nunca a
-    # de outra coluna (pedido do usuário, 2026-10-23: antes o Orçado usava a
-    # Receita Líquida do Realizado como base, e por isso a própria linha
-    # Receita Líquida do Orçado aparecia tipo "107,3%" em vez de 100,0%).
-    base_av_mes = dre_mes_real.get("receita_liquida")
-    base_av_orc_mes = dre_mes_orc.get("receita_liquida")
-    base_av_acum = dre_acum_real.get("receita_liquida")
-    base_av_orc_acum = dre_acum_orc.get("receita_liquida")
-    base_av_2025_mes = dre_mes_2025.get("receita_liquida") if dre_mes_2025 else None
-    base_av_2025_acum = dre_acum_2025.get("receita_liquida") if dre_acum_2025 else None
-
-    # Padding mais enxuto do que antes (era 6px 10px) — pedido do usuário,
-    # 2026-10-23: sem o prefixo "R$" em cada célula, o conteúdo ficou bem mais
-    # curto, então as colunas podem ficar mais estreitas também.
-    TH_VALOR = f"padding:6px 6px; text-align:right; background-color:{VERDE_ESCURO}; color:white; font-weight:700; white-space:nowrap;"
-    TH_DERIVADO = f"padding:6px 6px; text-align:right; background-color:{VERDE_DERIVADO_HEADER}; color:white; font-weight:700; white-space:nowrap;"
-    TH_GRUPO_VALOR = f"text-align:center; padding:6px; background-color:{VERDE_ESCURO}; color:white; font-weight:700;"
-    TH_GRUPO_DERIVADO = f"text-align:center; padding:6px; background-color:{VERDE_DERIVADO_HEADER}; color:white; font-weight:700;"
-    # position:sticky + z-index: a 1a coluna (rótulo da linha) fica fixa na
-    # rolagem horizontal das tabelas largas (DRE Acumulado/Forecast) — as
-    # colunas mais importantes (Acumulado, Orçado, Real. x Orç.) ficavam
-    # escondidas à direita até rolar (item 29, 2026-11-11).
-    TH_ROTULO = f"text-align:left; padding:6px 10px; background-color:{VERDE_ESCURO}; color:white; position:sticky; left:0; z-index:2;"
-
-
-    def _td(conteudo, extra="", classe="", rowspan=None) -> str:
-        atributo_rowspan = f" rowspan='{rowspan}'" if rowspan else ""
-        return f"<td class='{classe}'{atributo_rowspan} style='padding:6px 6px; text-align:right; white-space:nowrap; {extra}'>{conteudo}</td>"
-
-
-    def _td_valor(valor, extra="", classe="", rowspan=None) -> str:
-        cor = f"color:{VERMELHO};" if (valor or 0) < 0 else ""
-        return _td(format_brl_md(valor), extra + cor, classe, rowspan=rowspan)
-
-
-    def _celula_av(valor, base, disponivel=True, extra="", mostrar=True, rowspan=None, destaque=False) -> str:
-        # Receita Bruta e Impostos não mostram A.V.% — pedido do usuário,
-        # 2026-10-21 (a base do A.V.% virou Receita Líquida, e essas duas linhas
-        # viradas % dela soam estranhas: Receita Bruta > 100%, Imposto sempre
-        # perto de -10%).
-        if not mostrar:
-            return _td("", f"background-color:{VERDE_DERIVADO_TINT};" + extra, rowspan=rowspan)
-        texto = format_pct_av(valor, base, manter_sinal=destaque) if disponivel else "N/D"
-        # Linhas de resultado (destaque=True) carregam o sinal da margem — nesse
-        # caso, negativo também vira vermelho (igual ao valor em R$ da mesma
-        # linha); linhas de custo/despesa continuam só no verde padrão (sinal já
-        # vem do abs() de format_pct_av). Corrigido 2026-11-11 (item 1).
-        cor = f"color:{VERMELHO};" if destaque and disponivel and (valor or 0) < 0 else ""
-        return _td(texto, f"background-color:{VERDE_DERIVADO_TINT};{cor}" + extra, rowspan=rowspan)
-
-
-    def _espacador_th() -> str:
-        # Gap físico (~10% da largura de uma célula) pra separar blocos de
-        # colunas de verdade, sem nenhuma cor (branco sólido, não "transparent"
-        # — o fundo por trás não é garantido branco) — pedido do usuário,
-        # 2026-10-21.
-        return "<th style='padding:0; width:10px; background-color:#FFFFFF; border:none;'></th>"
-
-
-    def _espacador_td() -> str:
-        return "<td style='padding:0; width:10px; background-color:#FFFFFF; border:none;'></td>"
-
-
-    def _celulas_delta(real, orc, destaque: bool, rowspan=None) -> str:
-        delta = (real - orc) if orc is not None else None
-        ah = _variacao_pct(real, orc)
-        if destaque:
-            cor = "#FF7A7A" if (delta or 0) < 0 else "#FFFFFF"
-            estilo = f"background-color:{VERDE_ESCURO}; color:{cor};"
-        else:
-            cor = VERMELHO if (delta or 0) < 0 else "#1C7C3E"
-            estilo = f"color:{cor}; background-color:{VERDE_DERIVADO_TINT};"
-        texto_delta = format_brl_md(delta) if delta is not None else "N/D"
-        texto_ah = format_pct(ah) if ah is not None else "N/D"
-        return _td(texto_delta, estilo, rowspan=rowspan) + _td(texto_ah, estilo, rowspan=rowspan)
-
-
-    # --- Tabela do Mês ---------------------------------------------------
-    linhas_mes_html = []
-    for nome, campo, destaque in LINHAS_DRE_DEF:
-        real_mes = dre_mes_real[campo]
-        orc_mes = dre_mes_orc.get(campo)
-        real_2025_mes = dre_mes_2025.get(campo) if dre_mes_2025 else None
-        cor_fundo_linha = "#EAF2E0" if destaque else "#FFFFFF"
-        estilo_linha = f"font-weight:700; background-color:{cor_fundo_linha};" if destaque else f"background-color:{cor_fundo_linha};"
-        mostrar_av = campo not in ("receita_bruta", "imposto")
-        linhas_mes_html.append(
-            f"<tr style='{estilo_linha}'>"
-            f"<td style='padding:6px 12px; white-space:nowrap; position:sticky; left:0; z-index:1; background-color:{cor_fundo_linha};'>{nome}</td>"
-            + _td_valor(real_mes)
-            + _celula_av(real_mes, base_av_mes, mostrar=mostrar_av, destaque=destaque)
-            + _td_valor(orc_mes)
-            + _celula_av(orc_mes, base_av_orc_mes, disponivel=orc_mes is not None, mostrar=mostrar_av, destaque=destaque)
-            + _celulas_delta(real_mes, orc_mes, destaque)
-            + _td_valor(real_2025_mes)
-            + _celula_av(real_2025_mes, base_av_2025_mes, disponivel=real_2025_mes is not None, mostrar=mostrar_av, destaque=destaque)
-            + _celulas_delta(real_mes, real_2025_mes, destaque)
-            + "</tr>"
-        )
-        # Sem linha extra de "Margem X %" aqui (diferente da tabela Acumulado) —
-        # pedido do usuário, 2026-10-23: desde que o A.V.% passou a ter Receita
-        # Líquida como base, a Margem Bruta/EBITDA/LAIR já é exatamente o A.V.%
-        # mostrado na própria linha (Lucro Bruto/EBITDA/LAIR) acima — essa linha
-        # italic só repetia o mesmo número.
-
-    tabela_mes_html = (
-        # Sem width:100% de propósito — essa tabela tem bem menos colunas que a
-        # Acumulado (que precisa ser larga pro detalhamento mês a mês); se
-        # esticasse pra ocupar a mesma largura do container, as colunas ficariam
-        # com vãos enormes e sem proporção com a tabela de baixo.
-        "<table style='border-collapse:collapse; font-size:0.85rem; color:#1a1a1a;'>"
-        "<tr><th></th>"
-        f"<th colspan='2' style='{TH_GRUPO_VALOR}'>Realizado</th>"
-        f"<th colspan='2' style='{TH_GRUPO_VALOR}'>Orçado 2026</th>"
-        f"<th colspan='2' style='{TH_GRUPO_DERIVADO}'>Real. x Orç.</th>"
-        f"<th colspan='2' style='{TH_GRUPO_VALOR}'>Realizado 2025</th>"
-        f"<th colspan='2' style='{TH_GRUPO_DERIVADO}'>25x26</th>"
-        "</tr>"
-        f"<tr><th style='{TH_ROTULO}'>DRE - Superus Engenharia</th>"
-        f"<th style='{TH_VALOR}'>{nome_mes}/{ano}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
-        f"<th style='{TH_VALOR}'>{nome_mes}/{ano}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
-        f"<th style='{TH_DERIVADO}'>Δ</th><th style='{TH_DERIVADO}'>A.H.%</th>"
-        f"<th style='{TH_VALOR}'>{nome_mes}/{str(ano - 1)[2:]}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
-        f"<th style='{TH_DERIVADO}'>Δ</th><th style='{TH_DERIVADO}'>A.H.%</th>"
-        "</tr>"
-        + "".join(linhas_mes_html)
-        + "</table>"
-    )
-
-    st.markdown(
-        f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'{nome_mes}/{ano} (em R$)', tabela_mes_html)}</div>",
-        unsafe_allow_html=True,
-    )
-
-    # --- Tabela do Acumulado (com detalhamento mês a mês do Realizado) --
     meses_do_ano = [m for m in sorted(df_real["Mes"].dropna().unique()) if m.year == ano and m <= mes_ref]
     dre_por_mes = {m: calcular_dre(df_real_filtrado[df_real_filtrado["Mes"] == m]) for m in meses_do_ano}
 
-    linhas_acum_html = []
-    for nome, campo, destaque in LINHAS_DRE_DEF:
-        real_acum = dre_acum_real[campo]
-        orc_acum = dre_acum_orc.get(campo)
-        real_2025_acum = dre_acum_2025.get(campo) if dre_acum_2025 else None
-        cor_fundo_linha = "#EAF2E0" if destaque else "#FFFFFF"
-        estilo_linha = f"font-weight:700; background-color:{cor_fundo_linha};" if destaque else f"background-color:{cor_fundo_linha};"
-        mostrar_av = campo not in ("receita_bruta", "imposto")
-        eh_margem = campo in LINHAS_MARGEM
-        # Linhas de Margem (Lucro Bruto/EBITDA/LAIR) ganham uma 2ª linha logo
-        # abaixo só com a Margem % mês a mês (não repetida em nenhum outro
-        # lugar) — pedido do usuário, 2026-10-23. Do bloco Acumulado em diante
-        # (mesmo número que já está nesta linha principal), as células ficam
-        # mescladas (rowspan=2) com a linha de baixo em vez de repetir o
-        # mesmo A.V.% duas vezes.
-        rs = 2 if eh_margem else None
-        celulas_meses = "".join(_td_valor(dre_por_mes[m][campo], classe="col-mes-detalhe") for m in meses_do_ano)
-        linhas_acum_html.append(
-            f"<tr style='{estilo_linha}'>"
-            f"<td style='padding:6px 12px; white-space:nowrap; position:sticky; left:0; z-index:1; background-color:{cor_fundo_linha};'>{nome}</td>"
-            + celulas_meses
-            + _espacador_td()
-            + _td_valor(real_acum, rowspan=rs)
-            + _celula_av(real_acum, base_av_acum, mostrar=mostrar_av, rowspan=rs, destaque=destaque)
-            + _td_valor(orc_acum, rowspan=rs)
-            + _celula_av(orc_acum, base_av_orc_acum, disponivel=orc_acum is not None, mostrar=mostrar_av, rowspan=rs, destaque=destaque)
-            + _celulas_delta(real_acum, orc_acum, destaque, rowspan=rs)
-            + _td_valor(real_2025_acum, rowspan=rs)
-            + _celula_av(real_2025_acum, base_av_2025_acum, disponivel=real_2025_acum is not None, mostrar=mostrar_av, rowspan=rs, destaque=destaque)
-            + _celulas_delta(real_acum, real_2025_acum, destaque, rowspan=rs)
-            + "</tr>"
-        )
-        if eh_margem:
-            celulas_margem_meses = "".join(
-                _td(
-                    format_pct_av(dre_por_mes[m][campo], dre_por_mes[m].get("receita_liquida"), manter_sinal=True),
-                    extra=f"color:{VERMELHO};" if dre_por_mes[m][campo] < 0 else "",
-                    classe="col-mes-detalhe",
-                )
-                for m in meses_do_ano
-            )
-            linhas_acum_html.append(
-                "<tr style='font-style:italic; color:#555; background-color:#F7F9F4;'>"
-                f"<td style='padding:4px 12px 4px 24px; position:sticky; left:0; z-index:1; background-color:#F7F9F4;'>{LINHAS_MARGEM[campo]}</td>"
-                + celulas_margem_meses
-                + _espacador_td()
-                + "</tr>"
-            )
-
-    cabecalho_meses = "".join(
-        f"<th class='col-mes-detalhe' style='{TH_VALOR}'>{MESES_PT[m.month]}/{str(m.year)[2:]}</th>" for m in meses_do_ano
+    renderizar_dre_mes_e_acumulado(
+        "Superus Engenharia", ano, nome_mes, dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc,
+        dre_por_mes, meses_do_ano, dre_mes_2025=dre_mes_2025, dre_acum_2025=dre_acum_2025,
     )
 
-    tabela_acum_html = (
-        "<table style='width:100%; border-collapse:collapse; font-size:0.85rem; color:#1a1a1a;'>"
-        "<tr><th></th>"
-        f"<th class='col-mes-detalhe' colspan='{max(len(meses_do_ano), 1)}' style='{TH_GRUPO_VALOR}'>Realizado</th>"
-        "<th></th>"
-        f"<th colspan='2' style='{TH_GRUPO_VALOR}'>Acumulado</th>"
-        f"<th colspan='2' style='{TH_GRUPO_VALOR}'>Orçado</th>"
-        f"<th colspan='2' style='{TH_GRUPO_DERIVADO}'>Real. x Orç.</th>"
-        f"<th colspan='2' style='{TH_GRUPO_VALOR}'>Acumulado 2025</th>"
-        f"<th colspan='2' style='{TH_GRUPO_DERIVADO}'>25x26</th>"
-        "</tr>"
-        f"<tr><th style='{TH_ROTULO}'>DRE - Superus Engenharia</th>"
-        + cabecalho_meses
-        + _espacador_th()
-        + f"<th style='{TH_VALOR}'>{ano}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
-        + f"<th style='{TH_VALOR}'>{ano}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
-        + f"<th style='{TH_DERIVADO}'>Δ</th><th style='{TH_DERIVADO}'>A.H.%</th>"
-        + f"<th style='{TH_VALOR}'>{ano - 1}</th><th style='{TH_DERIVADO}'>A.V.%</th>"
-        + f"<th style='{TH_DERIVADO}'>Δ</th><th style='{TH_DERIVADO}'>A.H.%</th>"
-        "</tr>"
-        + "".join(linhas_acum_html)
-        + "</table>"
-    )
+    # Reaproveitados mais abaixo pela seção "DRE — Forecast" (mesmo estilo de
+    # espaçador/rótulo das tabelas acima, que agora vivem em resultado_comum.py).
+    TH_ROTULO = f"text-align:left; padding:6px 10px; background-color:{VERDE_ESCURO}; color:white; position:sticky; left:0; z-index:2;"
 
-    st.markdown(
-        f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'ACUMULADO/{ano} (em R$)', tabela_acum_html)}</div>",
-        unsafe_allow_html=True,
-    )
+    def _espacador_th() -> str:
+        return "<th style='padding:0; width:10px; background-color:#FFFFFF; border:none;'></th>"
+
+    def _espacador_td() -> str:
+        return "<td style='padding:0; width:10px; background-color:#FFFFFF; border:none;'></td>"
 
     if revisao_sel == "REV03" and despesa_provisoria:
         st.caption(

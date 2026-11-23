@@ -76,6 +76,38 @@ DROPBOX_ONEPAGE_REV03 = "/ONEPAGE_REV03.xlsx"
 # Superus = ACPL + Superus Holding + Superus Engenharia (mesmo recorte do
 # segmento "Superus Engenharia" no DASH_DIRETORIA, confirmado pelo usuário).
 COLIGADAS_SUPERUS = [2, 16, 18]
+COLIGADAS_ASAP = [14]
+COLIGADAS_OES = [11]
+# Grupo = Superus + ASAP, SEM a O&S — pedido explícito do usuário,
+# 2026-11-24: a Receita da O&S é o rateio de despesa cobrado de ASAP/
+# Superus pelos próprios serviços administrativos da O&S, então somá-la
+# direto contaria a mesma coisa duas vezes (uma como Receita da O&S, outra
+# já embutida na Despesa de quem paga). Mesma regra já usada no
+# DASH_DIRETORIA (coligadas_dos_grupos/coligada_os_excluida em dre.py).
+COLIGADAS_GRUPO = COLIGADAS_SUPERUS + COLIGADAS_ASAP
+
+# Previsto ASAP (REV00-REV02, upload manual — mesma política de todo
+# Previsto deste app, nunca Task Scheduler). Já sincronizados pelo
+# DASH_DIRETORIA — reaproveitando os mesmos caminhos no Dropbox (pedido do
+# usuário, 2026-11-24, igual ao reuso já feito pro Previsto da Engenharia).
+DROPBOX_ASAP_REV00_MOD = "/REV00_ASAP_BASE_PREV_REFINADO_MOD.xlsx"
+DROPBOX_ASAP_REV00_OTI = "/REV00_ASAP_BASE_PREV_REFINADO_OT.xlsx"
+DROPBOX_ASAP_REV01_MOD = "/REV01_ASAP_BASE_PREV_REFINADO_MD.xlsx"
+DROPBOX_ASAP_REV01_OTI = "/REV01_ASAP_BASE_PREV_REFINADO_OT.xlsx"
+DROPBOX_ASAP_REV02_MOD = "/ASAP_REV02_2026 Moderado.xlsx"
+DROPBOX_ASAP_REV02_OTI = "/ASAP_REV02_2026 Otimista.xlsx"
+
+# Forecast manual da ASAP (grade de Receita Bruta/Lucro Bruto por Cliente,
+# mesma ideia do Forecast da Superus) — arquivo PRÓPRIO, não compartilhado
+# com o DROPBOX_FORECAST da Superus (linhas/Clientes diferentes).
+DROPBOX_FORECAST_ASAP = "/app_forecast_receita_margem_asap.json"
+
+# Previsto O&S (só REV00/REV02 — não existe REV01/REV03 pra O&S, upload
+# manual). Já sincronizados pelo DASH_DIRETORIA — mesmos caminhos no Dropbox.
+DROPBOX_OES_REV00_MOD = "/OES_BASE_PREV_REFINADO_MOD.xlsx"
+DROPBOX_OES_REV00_OTI = "/OES_BASE_PREV_REFINADO_OT1.xlsx"
+DROPBOX_OES_REV02_MOD = "/REV2-DRE OES MODERADO.xlsx"
+DROPBOX_OES_REV02_OTI = "/REV2-DRE OES OTIMISTA.xlsx"
 
 # Classificação manual de Centro de Custo -> categoria (Receita: BackLog
 # Ativo/Novo/Inativo, Funil de Vendas, etc.; Despesa/SGA: Operação,
