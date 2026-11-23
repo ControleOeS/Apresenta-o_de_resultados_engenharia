@@ -34,7 +34,10 @@ def render() -> None:
     nome_mes = MESES_PT[mes_ref.month].upper()
 
     st.markdown(
-        render_banner("APRESENTAÇÃO DE RESULTADOS", f"O&amp;S · Revisão {revisao_sel} · Cenário {cenario_sel}"),
+        render_banner(
+            "APRESENTAÇÃO DE RESULTADOS", f"O&amp;S · Revisão {revisao_sel} · Cenário {cenario_sel}",
+            logo_nome_arquivo="oes_logo_preto.png",
+        ),
         unsafe_allow_html=True,
     )
     _ultimo_mes_real = df_real["Mes"].max()

@@ -30,11 +30,16 @@ def _imagem_base64(nome_arquivo: str) -> str:
     return base64.b64encode(caminho.read_bytes()).decode("ascii")
 
 
-def render_banner(titulo: str, subtitulo: str = "") -> str:
-    """Banner com gradiente teal->verde-limão e a logo ACPL+Superus (versão
-    colorida, fundo claro — igual à usada na capa da apresentação de
-    referência) num cartão branco à direita."""
-    logo = _imagem_base64("logo_acpl_superus.png")
+def render_banner(titulo: str, subtitulo: str = "", logo_nome_arquivo: str = "logo_acpl_superus.png") -> str:
+    """Banner com gradiente teal->verde-limão e a logo da empresa num cartão
+    branco à direita — por padrão ACPL+Superus (versão colorida, fundo
+    claro, igual à usada na capa da apresentação de referência); ASAP/O&S/
+    Grupo passam seu próprio arquivo (mesmas logos já usadas no
+    DASH_DIRETORIA — pedido do usuário, 2026-11-24, "identidade visual de
+    cada empresa nas abas"). logo_grupo_superus.png é a logo "Grupo Superus"
+    do DASH_DIRETORIA — não confirmado 1:1 com o recorte "Grupo" deste app
+    (Superus+ASAP, sem O&S), mas é a única logo de grupo disponível."""
+    logo = _imagem_base64(logo_nome_arquivo)
     subtitulo_html = f"<div style='color:#EAF5E5; font-size:0.95rem; margin-top:4px;'>{subtitulo}</div>" if subtitulo else ""
     return f"""
 <div style='background:{GRADIENTE_BANNER}; border-radius:10px; padding:22px 28px;
