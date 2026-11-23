@@ -13,14 +13,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from dados import LINHAS_DRE_DEF, LINHAS_MARGEM, MESES_PT
-from estilo import (
-    VERDE_DERIVADO_HEADER,
-    VERDE_DERIVADO_TINT,
-    VERDE_ESCURO,
-    VERDE_ORCADO,
-    VERMELHO,
-    render_tabela_com_faixa,
-)
+from estilo import PALETA_SUPERUS, VERMELHO, render_tabela_com_faixa
 from formatting import format_brl_compacto, format_brl_md, format_pct, format_pct_av
 
 
@@ -30,10 +23,14 @@ def _variacao_pct(real, orc):
     return (real - orc) / abs(orc)
 
 
-def _grafico_kpi(nome: str, campo: str, dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real, campo_margem_base=None):
+def _grafico_kpi(
+    nome: str, campo: str, dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real, campo_margem_base=None,
+    paleta: dict | None = None,
+):
+    paleta = paleta or PALETA_SUPERUS
     rotulos = ["Mês Orç.", "Mês Real.", "Acum. Orç.", "Acum. Real."]
     valores = [dre_mes_orc.get(campo), dre_mes_real.get(campo), dre_acum_orc.get(campo), dre_acum_real.get(campo)]
-    cores = [VERDE_ORCADO, VERDE_ESCURO, VERDE_ORCADO, VERDE_ESCURO]
+    cores = [paleta["cor_destaque"], paleta["cor_escura"], paleta["cor_destaque"], paleta["cor_escura"]]
     textos = [format_brl_compacto(v) for v in valores]
     cores_texto = [VERMELHO if (v or 0) < 0 else "#1A1A1A" for v in valores]
 
@@ -106,15 +103,21 @@ def _grafico_kpi(nome: str, campo: str, dre_mes_orc, dre_mes_real, dre_acum_orc,
     return fig, legenda_margem
 
 
-def renderizar_kpis(dre_mes_real: dict, dre_mes_orc: dict, dre_acum_real: dict, dre_acum_orc: dict) -> None:
+def renderizar_kpis(
+    dre_mes_real: dict, dre_mes_orc: dict, dre_acum_real: dict, dre_acum_orc: dict, paleta: dict | None = None,
+) -> None:
+    paleta = paleta or PALETA_SUPERUS
     st.header("KPIs")
 
     c1, c2 = st.columns(2)
-    fig, _ = _grafico_kpi("Receita Bruta (em R$)", "receita_bruta", dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real)
+    fig, _ = _grafico_kpi(
+        "Receita Bruta (em R$)", "receita_bruta", dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real,
+        paleta=paleta,
+    )
     c1.plotly_chart(fig, use_container_width=True)
     fig, legenda = _grafico_kpi(
         "Lucro Bruto (em R$)", "margem_bruta", dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real,
-        campo_margem_base="receita_liquida",
+        campo_margem_base="receita_liquida", paleta=paleta,
     )
     c2.plotly_chart(fig, use_container_width=True)
     if legenda:
@@ -123,14 +126,14 @@ def renderizar_kpis(dre_mes_real: dict, dre_mes_orc: dict, dre_acum_real: dict, 
     c3, c4 = st.columns(2)
     fig, legenda = _grafico_kpi(
         "EBITDA (em R$)", "ebitda", dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real,
-        campo_margem_base="receita_liquida",
+        campo_margem_base="receita_liquida", paleta=paleta,
     )
     c3.plotly_chart(fig, use_container_width=True)
     if legenda:
         c3.caption(legenda)
     fig, legenda = _grafico_kpi(
         "LAIR (em R$)", "lair", dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real,
-        campo_margem_base="receita_liquida",
+        campo_margem_base="receita_liquida", paleta=paleta,
     )
     c4.plotly_chart(fig, use_container_width=True)
     if legenda:
@@ -149,12 +152,19 @@ def renderizar_dre_mes_e_acumulado(
     meses_do_ano: list,
     dre_mes_2025: dict | None = None,
     dre_acum_2025: dict | None = None,
+    paleta: dict | None = None,
 ) -> None:
     """dre_por_mes: {Timestamp do mês: dict do calcular_dre} pra cada mês já
     fechado do ano (detalhamento mês a mês da tabela Acumulado). dre_mes_2025/
     dre_acum_2025 são opcionais — None faz a coluna "Realizado {ano-1}" (e os
     dois Δ dela) aparecer como N/D, pros segmentos sem RESULTADOS {ano-1}.xlsx
-    equivalente (hoje só a Superus tem)."""
+    equivalente (hoje só a Superus tem). paleta: cores da empresa (ver
+    estilo.PALETA_POR_SEGMENTO) — default Superus."""
+    paleta = paleta or PALETA_SUPERUS
+    cor_escura = paleta["cor_escura"]
+    cor_derivado_header = paleta["derivado_header"]
+    cor_derivado_tint = paleta["derivado_tint"]
+
     base_av_mes = dre_mes_real.get("receita_liquida")
     base_av_orc_mes = dre_mes_orc.get("receita_liquida")
     base_av_acum = dre_acum_real.get("receita_liquida")
@@ -162,11 +172,11 @@ def renderizar_dre_mes_e_acumulado(
     base_av_2025_mes = dre_mes_2025.get("receita_liquida") if dre_mes_2025 else None
     base_av_2025_acum = dre_acum_2025.get("receita_liquida") if dre_acum_2025 else None
 
-    TH_VALOR = f"padding:6px 6px; text-align:right; background-color:{VERDE_ESCURO}; color:white; font-weight:700; white-space:nowrap;"
-    TH_DERIVADO = f"padding:6px 6px; text-align:right; background-color:{VERDE_DERIVADO_HEADER}; color:white; font-weight:700; white-space:nowrap;"
-    TH_GRUPO_VALOR = f"text-align:center; padding:6px; background-color:{VERDE_ESCURO}; color:white; font-weight:700;"
-    TH_GRUPO_DERIVADO = f"text-align:center; padding:6px; background-color:{VERDE_DERIVADO_HEADER}; color:white; font-weight:700;"
-    TH_ROTULO = f"text-align:left; padding:6px 10px; background-color:{VERDE_ESCURO}; color:white; position:sticky; left:0; z-index:2;"
+    TH_VALOR = f"padding:6px 6px; text-align:right; background-color:{cor_escura}; color:white; font-weight:700; white-space:nowrap;"
+    TH_DERIVADO = f"padding:6px 6px; text-align:right; background-color:{cor_derivado_header}; color:white; font-weight:700; white-space:nowrap;"
+    TH_GRUPO_VALOR = f"text-align:center; padding:6px; background-color:{cor_escura}; color:white; font-weight:700;"
+    TH_GRUPO_DERIVADO = f"text-align:center; padding:6px; background-color:{cor_derivado_header}; color:white; font-weight:700;"
+    TH_ROTULO = f"text-align:left; padding:6px 10px; background-color:{cor_escura}; color:white; position:sticky; left:0; z-index:2;"
 
     def _td(conteudo, extra="", classe="", rowspan=None) -> str:
         atributo_rowspan = f" rowspan='{rowspan}'" if rowspan else ""
@@ -178,10 +188,10 @@ def renderizar_dre_mes_e_acumulado(
 
     def _celula_av(valor, base, disponivel=True, extra="", mostrar=True, rowspan=None, destaque=False) -> str:
         if not mostrar:
-            return _td("", f"background-color:{VERDE_DERIVADO_TINT};" + extra, rowspan=rowspan)
+            return _td("", f"background-color:{cor_derivado_tint};" + extra, rowspan=rowspan)
         texto = format_pct_av(valor, base, manter_sinal=destaque) if disponivel else "N/D"
         cor = f"color:{VERMELHO};" if destaque and disponivel and (valor or 0) < 0 else ""
-        return _td(texto, f"background-color:{VERDE_DERIVADO_TINT};{cor}" + extra, rowspan=rowspan)
+        return _td(texto, f"background-color:{cor_derivado_tint};{cor}" + extra, rowspan=rowspan)
 
     def _espacador_th() -> str:
         return "<th style='padding:0; width:10px; background-color:#FFFFFF; border:none;'></th>"
@@ -194,10 +204,10 @@ def renderizar_dre_mes_e_acumulado(
         ah = _variacao_pct(real, orc)
         if destaque:
             cor = "#FF7A7A" if (delta or 0) < 0 else "#FFFFFF"
-            estilo = f"background-color:{VERDE_ESCURO}; color:{cor};"
+            estilo = f"background-color:{cor_escura}; color:{cor};"
         else:
             cor = VERMELHO if (delta or 0) < 0 else "#1C7C3E"
-            estilo = f"color:{cor}; background-color:{VERDE_DERIVADO_TINT};"
+            estilo = f"color:{cor}; background-color:{cor_derivado_tint};"
         texto_delta = format_brl_md(delta) if delta is not None else "N/D"
         texto_ah = format_pct(ah) if ah is not None else "N/D"
         return _td(texto_delta, estilo, rowspan=rowspan) + _td(texto_ah, estilo, rowspan=rowspan)
@@ -248,7 +258,7 @@ def renderizar_dre_mes_e_acumulado(
     )
 
     st.markdown(
-        f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'{nome_mes}/{ano} (em R$)', tabela_mes_html)}</div>",
+        f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'{nome_mes}/{ano} (em R$)', tabela_mes_html, paleta=paleta)}</div>",
         unsafe_allow_html=True,
     )
 
@@ -325,6 +335,6 @@ def renderizar_dre_mes_e_acumulado(
     )
 
     st.markdown(
-        f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'ACUMULADO/{ano} (em R$)', tabela_acum_html)}</div>",
+        f"<div class='tabela-dre-wrapper'>{render_tabela_com_faixa(f'ACUMULADO/{ano} (em R$)', tabela_acum_html, paleta=paleta)}</div>",
         unsafe_allow_html=True,
     )

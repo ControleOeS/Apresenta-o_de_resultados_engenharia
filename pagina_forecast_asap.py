@@ -10,7 +10,7 @@ import streamlit as st
 
 from config import COLIGADAS_ASAP
 from dados import LINHAS_DRE_DEF, MESES_PT, carregar_realizado_por_coligadas
-from estilo import VERDE_ESCURO, VERMELHO, render_tabela_com_faixa
+from estilo import PALETA_ASAP, VERMELHO, render_tabela_com_faixa
 from formatting import format_brl_md
 from forecast import chave_linha, fechar_linha, imposto_pct_linha, lucro_bruto_padrao, meses_forecast, validar_lucro_bruto
 from forecast_asap import (
@@ -224,8 +224,8 @@ def render() -> None:
     )
     dre_total_ano = {campo: sum(dre_por_mes[mes][campo] for mes in dre_por_mes) for _, campo, _ in LINHAS_DRE_DEF}
 
-    TH_VALOR = f"padding:6px 6px; text-align:right; background-color:{VERDE_ESCURO}; color:white; font-weight:700; white-space:nowrap;"
-    TH_ROTULO = f"text-align:left; padding:6px 10px; background-color:{VERDE_ESCURO}; color:white; position:sticky; left:0; z-index:2;"
+    TH_VALOR = f"padding:6px 6px; text-align:right; background-color:{PALETA_ASAP['cor_escura']}; color:white; font-weight:700; white-space:nowrap;"
+    TH_ROTULO = f"text-align:left; padding:6px 10px; background-color:{PALETA_ASAP['cor_escura']}; color:white; position:sticky; left:0; z-index:2;"
 
     def _td_valor(valor) -> str:
         cor = f"color:{VERMELHO};" if (valor or 0) < 0 else ""
@@ -251,7 +251,9 @@ def render() -> None:
     )
 
     st.markdown(
-        render_tabela_com_faixa(f"Jan-{MESES_PT[meses_fc[-1].month]}/{ano} (em R$)", tabela_dre_html, largura_total=True),
+        render_tabela_com_faixa(
+            f"Jan-{MESES_PT[meses_fc[-1].month]}/{ano} (em R$)", tabela_dre_html, largura_total=True, paleta=PALETA_ASAP,
+        ),
         unsafe_allow_html=True,
     )
     st.caption(

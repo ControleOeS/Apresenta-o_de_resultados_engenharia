@@ -25,7 +25,7 @@ from dados import (
     carregar_previsto_refinado,
     carregar_realizado_por_coligadas,
 )
-from estilo import render_banner
+from estilo import PALETA_GRUPO, render_banner
 from previsto_asap import calcular_previsto_efetivo_asap, carregar_previsto_asap
 from resultado_comum import renderizar_dre_mes_e_acumulado, renderizar_kpis
 
@@ -88,7 +88,7 @@ def render() -> None:
     st.markdown(
         render_banner(
             "APRESENTAÇÃO DE RESULTADOS", f"Grupo (Superus + ASAP) · Revisão {revisao_sel} · Cenário {cenario_sel}",
-            logo_nome_arquivo="logo_grupo_superus.png",
+            paleta=PALETA_GRUPO,
         ),
         unsafe_allow_html=True,
     )
@@ -125,7 +125,7 @@ def render() -> None:
             "Orçado do Grupo aparece como N/D (nunca uma soma parcial de só um dos dois)."
         )
 
-    renderizar_kpis(dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc)
+    renderizar_kpis(dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc, paleta=PALETA_GRUPO)
     st.divider()
 
     meses_do_ano = [m for m in sorted(df_real_grupo["Mes"].dropna().unique()) if m.year == ano and m <= mes_ref]
@@ -133,4 +133,5 @@ def render() -> None:
 
     renderizar_dre_mes_e_acumulado(
         "Grupo", ano, nome_mes, dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc, dre_por_mes, meses_do_ano,
+        paleta=PALETA_GRUPO,
     )

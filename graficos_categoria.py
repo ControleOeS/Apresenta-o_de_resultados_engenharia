@@ -1,21 +1,23 @@
 """Gráfico de barras empilhadas por categoria (Receita Bruta / Despesa /
 Lucro Bruto por Categoria), fiel ao desenho das páginas 8/9/12 da
 apresentação de referência: 2 barras (Orçado x Realizado), cada uma
-empilhada por categoria, com uma caixa de total acima de cada barra.
-Cores amostradas diretamente da apresentação (BackLog Ativo = mais
-escuro, Funil de Vendas = mais claro)."""
+empilhada por categoria, com uma caixa de total acima de cada barra. Só a
+Superus usa este módulo hoje (Análise por Categoria é escopo exclusivo
+dela) — rampa ancorada nas 2 cores oficiais da marca Superus (ver
+estilo.PALETA_SUPERUS); o tom "claro" é derivado (mistura com branco),
+calibrado pra reproduzir de perto o tom que já existia hardcoded
+(#C8E09B)."""
 
 import plotly.graph_objects as go
 
-from estilo import VERDE_ESCURO, VERMELHO
+from estilo import PALETA_SUPERUS, VERDE_ESCURO, VERMELHO, hex_para_rgb, mesclar
 
-# Rampa escuro -> claro amostrada da apresentação de referência (BackLog
-# Ativo #1C3024, BackLog Novo #6AA62C, Funil de Vendas #C8E09B) — os tons
+# Rampa escuro -> claro ancorada na paleta oficial da Superus — os tons
 # intermediários/adicionais são interpolados linearmente entre esses.
 _PONTOS_RAMPA = [
-    (0x1C, 0x30, 0x24),  # escuro (BackLog Ativo)
-    (0x6A, 0xA6, 0x2C),  # medio (BackLog Novo)
-    (0xC8, 0xE0, 0x9B),  # claro (Funil de Vendas)
+    hex_para_rgb(PALETA_SUPERUS["cor_escura"]),  # escuro (BackLog Ativo)
+    hex_para_rgb(PALETA_SUPERUS["cor_destaque"]),  # medio (BackLog Novo)
+    hex_para_rgb(mesclar(PALETA_SUPERUS["cor_destaque"], "#FFFFFF", 0.60)),  # claro (Funil de Vendas)
 ]
 
 

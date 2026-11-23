@@ -8,7 +8,7 @@ import streamlit as st
 
 from config import COLIGADAS_OES
 from dados import MESES_PT, calcular_dre, carregar_realizado_por_coligadas
-from estilo import render_banner
+from estilo import PALETA_OES, render_banner
 from previsto_oes import calcular_previsto_efetivo_oes
 from resultado_comum import renderizar_dre_mes_e_acumulado, renderizar_kpis
 
@@ -36,7 +36,7 @@ def render() -> None:
     st.markdown(
         render_banner(
             "APRESENTAÇÃO DE RESULTADOS", f"O&amp;S · Revisão {revisao_sel} · Cenário {cenario_sel}",
-            logo_nome_arquivo="oes_logo_preto.png",
+            paleta=PALETA_OES,
         ),
         unsafe_allow_html=True,
     )
@@ -56,7 +56,7 @@ def render() -> None:
     if not dre_acum_orc:
         st.warning(f"⚠️ A {revisao_sel} não tem base de Previsto para a O&S — Orçado aparece como N/D.")
 
-    renderizar_kpis(dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc)
+    renderizar_kpis(dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc, paleta=PALETA_OES)
     st.divider()
 
     meses_do_ano = [m for m in sorted(df_real["Mes"].dropna().unique()) if m.year == ano and m <= mes_ref]
@@ -64,4 +64,5 @@ def render() -> None:
 
     renderizar_dre_mes_e_acumulado(
         "O&S", ano, nome_mes, dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc, dre_por_mes, meses_do_ano,
+        paleta=PALETA_OES,
     )

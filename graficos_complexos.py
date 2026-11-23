@@ -4,13 +4,22 @@ condição binária (Acima/Abaixo do previsto, Positivo/Negativo)."""
 
 import plotly.graph_objects as go
 
+from estilo import PALETA_SUPERUS, mesclar
+
+# Só a Superus usa este módulo hoje (Análise de Complexos é escopo
+# exclusivo dela, ver pagina_resultado_asap.py) — as 2 cores "oficiais"
+# vêm da paleta da Superus (ver estilo._derivar_paleta); "Backlog Inativo"
+# (cinza) e "Negativa" (bege) são neutros de status, não identidade
+# visual, então continuam fixos. "Em Mobilização" é um tom derivado
+# (mistura com branco) da mesma forma que o resto da paleta, calibrado
+# pra reproduzir de perto o tom que já existia hardcoded (#C8D9A0).
 CORES_STATUS = {
-    "Backlog Ativo": "#1C3024",
+    "Backlog Ativo": PALETA_SUPERUS["cor_escura"],
     "Backlog Inativo": "#6B6B63",
-    "Backlog Novo Mobilizado": "#6AA62C",
-    "Backlog Novo Em Mobilização": "#C8D9A0",
+    "Backlog Novo Mobilizado": PALETA_SUPERUS["cor_destaque"],
+    "Backlog Novo Em Mobilização": mesclar(PALETA_SUPERUS["cor_destaque"], "#FFFFFF", 0.58),
 }
-COR_POSITIVA = "#1C3024"
+COR_POSITIVA = PALETA_SUPERUS["cor_escura"]
 COR_NEGATIVA = "#D9D2C0"
 
 
