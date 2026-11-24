@@ -25,7 +25,7 @@ def _variacao_pct(real, orc):
 
 def _grafico_kpi(
     nome: str, campo: str, dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real, campo_margem_base=None,
-    paleta: dict | None = None,
+    paleta: dict | None = None, detalhe_coligadas: dict | None = None,
 ):
     paleta = paleta or PALETA_SUPERUS
     rotulos = ["Mês Orç.", "Mês Real.", "Acum. Orç.", "Acum. Real."]
@@ -33,6 +33,19 @@ def _grafico_kpi(
     cores = [paleta["cor_destaque"], paleta["cor_escura"], paleta["cor_destaque"], paleta["cor_escura"]]
     textos = [format_brl_compacto(v) for v in valores]
     cores_texto = [VERMELHO if (v or 0) < 0 else "#1A1A1A" for v in valores]
+
+    # Só o Grupo passa `detalhe_coligadas` (Superus+ASAP somadas, pedido do
+    # usuário 2026-11-24: "deixe a legenda do cursor falando o que o valor
+    # daquela barra é referente a cada coligada") — as demais abas (segmento
+    # único) continuam com o hover padrão do Plotly (x, y).
+    hovertextos = None
+    if detalhe_coligadas:
+        hovertextos = []
+        for i, (rotulo, chave) in enumerate(zip(rotulos, ["mes_orc", "mes_real", "acum_orc", "acum_real"])):
+            linhas = [f"<b>{rotulo}</b>", f"Total: {format_brl_compacto(valores[i])}"]
+            for nome_coligada, dre_coligada in detalhe_coligadas.get(chave, {}).items():
+                linhas.append(f"{nome_coligada}: {format_brl_compacto(dre_coligada.get(campo))}")
+            hovertextos.append("<br>".join(linhas))
 
     var_mes = _variacao_pct(dre_mes_real.get(campo), dre_mes_orc.get(campo))
     var_acum = _variacao_pct(dre_acum_real.get(campo), dre_acum_orc.get(campo))
@@ -53,6 +66,8 @@ def _grafico_kpi(
             textposition="outside",
             textfont=dict(color=cores_texto, size=13, weight=700),
             cliponaxis=False,
+            hovertext=hovertextos,
+            hoverinfo="text" if hovertextos else None,
         )
     )
 
@@ -105,19 +120,23 @@ def _grafico_kpi(
 
 def renderizar_kpis(
     dre_mes_real: dict, dre_mes_orc: dict, dre_acum_real: dict, dre_acum_orc: dict, paleta: dict | None = None,
+    detalhe_coligadas: dict | None = None,
 ) -> None:
+    """detalhe_coligadas: {"mes_orc"/"mes_real"/"acum_orc"/"acum_real": {nome: dict do
+    calcular_dre daquela coligada}} — só o Grupo passa isso, pra mostrar no hover de
+    cada barra quanto cada coligada (Superus/ASAP) contribuiu pro total somado."""
     paleta = paleta or PALETA_SUPERUS
     st.header("KPIs")
 
     c1, c2 = st.columns(2)
     fig, _ = _grafico_kpi(
         "Receita Bruta (em R$)", "receita_bruta", dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real,
-        paleta=paleta,
+        paleta=paleta, detalhe_coligadas=detalhe_coligadas,
     )
     c1.plotly_chart(fig, use_container_width=True)
     fig, legenda = _grafico_kpi(
         "Lucro Bruto (em R$)", "margem_bruta", dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real,
-        campo_margem_base="receita_liquida", paleta=paleta,
+        campo_margem_base="receita_liquida", paleta=paleta, detalhe_coligadas=detalhe_coligadas,
     )
     c2.plotly_chart(fig, use_container_width=True)
     if legenda:
@@ -126,14 +145,14 @@ def renderizar_kpis(
     c3, c4 = st.columns(2)
     fig, legenda = _grafico_kpi(
         "EBITDA (em R$)", "ebitda", dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real,
-        campo_margem_base="receita_liquida", paleta=paleta,
+        campo_margem_base="receita_liquida", paleta=paleta, detalhe_coligadas=detalhe_coligadas,
     )
     c3.plotly_chart(fig, use_container_width=True)
     if legenda:
         c3.caption(legenda)
     fig, legenda = _grafico_kpi(
         "LAIR (em R$)", "lair", dre_mes_orc, dre_mes_real, dre_acum_orc, dre_acum_real,
-        campo_margem_base="receita_liquida", paleta=paleta,
+        campo_margem_base="receita_liquida", paleta=paleta, detalhe_coligadas=detalhe_coligadas,
     )
     c4.plotly_chart(fig, use_container_width=True)
     if legenda:

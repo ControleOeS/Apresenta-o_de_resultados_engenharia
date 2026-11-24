@@ -103,6 +103,18 @@ def render() -> None:
     dre_mes_real = calcular_dre(df_real_grupo[df_real_grupo["Mes"] == mes_ref])
     dre_acum_real = calcular_dre(df_real_grupo[(df_real_grupo["Mes"] >= mes_ini_ano) & (df_real_grupo["Mes"] <= mes_ref)])
 
+    # Mesmo recorte por coligada (Superus/ASAP) do Realizado combinado acima,
+    # só que calculado separado — usado só pra alimentar o hover das barras
+    # (ver detalhe_coligadas abaixo), nunca pra somar de novo o dre_*_real.
+    dre_mes_real_superus = calcular_dre(df_real_superus[df_real_superus["Mes"] == mes_ref])
+    dre_acum_real_superus = calcular_dre(
+        df_real_superus[(df_real_superus["Mes"] >= mes_ini_ano) & (df_real_superus["Mes"] <= mes_ref)]
+    )
+    dre_mes_real_asap = calcular_dre(df_real_asap[df_real_asap["Mes"] == mes_ref])
+    dre_acum_real_asap = calcular_dre(
+        df_real_asap[(df_real_asap["Mes"] >= mes_ini_ano) & (df_real_asap["Mes"] <= mes_ref)]
+    )
+
     # Lado Superus usa a MESMA cascata/fallback já usada na aba Resultado da
     # Superus (calcular_previsto_com_fallback_despesa) — df_real aqui é só
     # pra fallback interno (Orçado não tem granularidade de Coligada/CC
@@ -125,7 +137,16 @@ def render() -> None:
             "Orçado do Grupo aparece como N/D (nunca uma soma parcial de só um dos dois)."
         )
 
-    renderizar_kpis(dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc, paleta=PALETA_GRUPO)
+    detalhe_coligadas = {
+        "mes_orc": {"Superus": dre_mes_orc_superus or {}, "ASAP": dre_mes_orc_asap or {}},
+        "mes_real": {"Superus": dre_mes_real_superus, "ASAP": dre_mes_real_asap},
+        "acum_orc": {"Superus": dre_acum_orc_superus or {}, "ASAP": dre_acum_orc_asap or {}},
+        "acum_real": {"Superus": dre_acum_real_superus, "ASAP": dre_acum_real_asap},
+    }
+    renderizar_kpis(
+        dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc, paleta=PALETA_GRUPO,
+        detalhe_coligadas=detalhe_coligadas,
+    )
     st.divider()
 
     meses_do_ano = [m for m in sorted(df_real_grupo["Mes"].dropna().unique()) if m.year == ano and m <= mes_ref]
