@@ -10,7 +10,7 @@ from config import COLIGADAS_OES
 from dados import MESES_PT, calcular_dre, carregar_realizado_por_coligadas
 from estilo import PALETA_OES, render_banner
 from previsto_oes import calcular_previsto_efetivo_oes
-from resultado_comum import renderizar_dre_mes_e_acumulado, renderizar_kpis
+from resultado_comum import renderizar_dre_mes_e_acumulado
 
 REVISOES_OES = ["REV00", "REV02"]
 
@@ -55,9 +55,6 @@ def render() -> None:
     dre_acum_orc = calcular_previsto_efetivo_oes(df_real, revisao_sel, cenario_sel, mes_ini_ano, mes_ref) or {}
     if not dre_acum_orc:
         st.warning(f"⚠️ A {revisao_sel} não tem base de Previsto para a O&S — Orçado aparece como N/D.")
-
-    renderizar_kpis(dre_mes_real, dre_mes_orc, dre_acum_real, dre_acum_orc, paleta=PALETA_OES)
-    st.divider()
 
     meses_do_ano = [m for m in sorted(df_real["Mes"].dropna().unique()) if m.year == ano and m <= mes_ref]
     dre_por_mes = {m: calcular_dre(df_real[df_real["Mes"] == m]) for m in meses_do_ano}
