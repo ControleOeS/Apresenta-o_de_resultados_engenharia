@@ -18,6 +18,8 @@ Administrativas, 5=Depreciação/Amortização), 6=Despesa Financeira,
 7=IRPJ/CSLL. Sinal: Receita positiva, resto já negativo (dedução=negativo) —
 sem flip de sinal, igual ao REV00 da Engenharia."""
 
+from datetime import datetime
+
 import pandas as pd
 import streamlit as st
 
@@ -28,6 +30,7 @@ from config import (
     DROPBOX_ASAP_REV01_OTI,
     DROPBOX_ASAP_REV02_MOD,
     DROPBOX_ASAP_REV02_OTI,
+    DROPBOX_ASAP_REV03,
 )
 from dados import MES_NUMERO, MESES_COLUNA, calcular_dre, mes_corte_revisao, normalizar_codigo_cc
 from dropbox_io import download, token_e_revs
@@ -39,6 +42,12 @@ CODIGO_CUSTO = 3
 CODIGOS_DESPESA_ADM = [4, 5]
 CODIGO_DESPESA_FINANCEIRA = 6
 CODIGO_IMPOSTO_RENDA = 7
+# Só a REV03 usa esse código (REV00-02 não discriminam "Outros" — fica
+# embutido na Despesa Administrativa de lá). Mesmo balde do Realizado
+# (NIVEL_OUTROS em dados.py) — fica FORA do EBITDA e dentro do LAIR, igual
+# ao Realizado faz (calcular_dre: ebitda exclui outros, lair = ebitda +
+# outros + despesa_financeira).
+CODIGO_OUTROS = 8
 
 CAMPOS_PREVISTO_ASAP = [
     "receita_bruta", "imposto", "receita_liquida", "custo", "margem_bruta",
@@ -106,8 +115,53 @@ def _ler_rev02(content: bytes, cenario: str) -> pd.DataFrame:
     return longo[["Codigo", "CC", "Centro de Custo", "Cenário", "Revisão", "Mes", "Valor"]]
 
 
+# REV03 (aba "DePara_CC") usa um esquema de classificação por TEXTO
+# ("Grupo DRE"), linha a linha por Centro de Custo — bem mais simples que
+# REV00-02 (sem distinguir Receita de Imposto pelo "Fato Contábil", já vem
+# cada um no seu próprio grupo). "(-) Despesa Total" vira o mesmo balde de
+# Despesa Administrativa de sempre (CODIGOS_DESPESA_ADM[0]) — REV03 não
+# distingue Depreciação/Amortização dentro dela, igual ao REV02. "(-) Outros
+# Itens não Operacionais" é um grupo PRÓPRIO aqui (ao contrário de REV00-02,
+# que não discriminam isso) — mapeado pro CODIGO_OUTROS novo. Confirmado por
+# inspeção direta do arquivo, 2026-11-25 (valores já vêm com o sinal certo,
+# igual ao REV00/REV01 — sem flip de sinal).
+_GRUPO_DRE_REV03_PARA_CODIGO = {
+    "(+) Receita Bruta": CODIGO_RECEITA_BRUTA,
+    "(-) Impostos Sobre Receita": CODIGO_IMPOSTO,
+    "(-) Custo Total": CODIGO_CUSTO,
+    "(-) Despesa Total": CODIGOS_DESPESA_ADM[0],
+    "(-) Outros Itens não Operacionais": CODIGO_OUTROS,
+    "(-) Despesa Financeira": CODIGO_DESPESA_FINANCEIRA,
+    "(-) IRPJ/CSLL": CODIGO_IMPOSTO_RENDA,
+}
+
+
+def _ler_rev03(content: bytes, cenario: str) -> pd.DataFrame:
+    """Único arquivo da REV03 (pedido do usuário, 2026-11-25: "utilize esse
+    valor como moderado e otimista da ASAP") — lido duas vezes, uma por
+    Cenário, pra entrar no mesmo formato longo das demais Revisões."""
+    df = pd.read_excel(BytesIO(content), sheet_name="DePara_CC", header=3, engine="calamine")
+    df = df.rename(columns={"Cód. CC": "CC"})
+    df = df.dropna(subset=["Grupo DRE"])
+    df["CC"] = df["CC"].map(normalizar_codigo_cc)
+    df["Codigo"] = df["Grupo DRE"].map(_GRUPO_DRE_REV03_PARA_CODIGO)
+
+    meses_coluna = [c for c in df.columns if isinstance(c, datetime)]
+    for mes in meses_coluna:
+        df[mes] = pd.to_numeric(df[mes], errors="coerce").fillna(0)
+    df["Cenário"] = cenario
+    df["Revisão"] = "REV03"
+    longo = df.melt(
+        id_vars=["Codigo", "CC", "Centro de Custo", "Cenário", "Revisão"],
+        value_vars=meses_coluna, var_name="Mes", value_name="Valor",
+    )
+    longo["Mes"] = pd.to_datetime(longo["Mes"])
+    return longo[["Codigo", "CC", "Centro de Custo", "Cenário", "Revisão", "Mes", "Valor"]]
+
+
 @st.cache_data(show_spinner="Lendo Previsto ASAP do Dropbox...")
 def _ler_previsto_asap(_token: str, cache_key: str) -> pd.DataFrame:
+    conteudo_rev03 = download(_token, DROPBOX_ASAP_REV03)
     partes = [
         _ler_rev00_rev01(download(_token, DROPBOX_ASAP_REV00_MOD), "REV00", "Moderado"),
         _ler_rev00_rev01(download(_token, DROPBOX_ASAP_REV00_OTI), "REV00", "Otimista"),
@@ -115,16 +169,20 @@ def _ler_previsto_asap(_token: str, cache_key: str) -> pd.DataFrame:
         _ler_rev00_rev01(download(_token, DROPBOX_ASAP_REV01_OTI), "REV01", "Otimista"),
         _ler_rev02(download(_token, DROPBOX_ASAP_REV02_MOD), "Moderado"),
         _ler_rev02(download(_token, DROPBOX_ASAP_REV02_OTI), "Otimista"),
+        _ler_rev03(conteudo_rev03, "Moderado"),
+        _ler_rev03(conteudo_rev03, "Otimista"),
     ]
     return pd.concat(partes, ignore_index=True)
 
 
 def carregar_previsto_asap() -> pd.DataFrame:
-    """Previsto da ASAP: REV00/REV01/REV02, Moderado e Otimista — todas com
-    cascata completa até Lucro Líquido. Não existe REV03 pra ASAP ainda."""
+    """Previsto da ASAP: REV00/REV01/REV02/REV03, Moderado e Otimista — todas
+    com cascata completa até Lucro Líquido. REV03 reusa o mesmo arquivo pros
+    dois Cenários (ver _ler_rev03)."""
     paths = [
         DROPBOX_ASAP_REV00_MOD, DROPBOX_ASAP_REV00_OTI, DROPBOX_ASAP_REV01_MOD,
         DROPBOX_ASAP_REV01_OTI, DROPBOX_ASAP_REV02_MOD, DROPBOX_ASAP_REV02_OTI,
+        DROPBOX_ASAP_REV03,
     ]
     token, rev = token_e_revs(paths)
     return _ler_previsto_asap(token, rev)
@@ -148,8 +206,13 @@ def calcular_previsto_asap(df: pd.DataFrame, cenario: str) -> dict:
     margem_bruta = receita_liquida + custo
     despesa_adm = soma(CODIGOS_DESPESA_ADM)
     ebitda = margem_bruta + despesa_adm
+    # "outros" só existe de verdade na REV03 (CODIGO_OUTROS) — nas demais
+    # Revisões soma(CODIGO_OUTROS) é sempre 0 (nenhuma linha usa esse
+    # código), então lair fica idêntico ao de antes pra elas. Mesma posição
+    # do Realizado (calcular_dre): fora do EBITDA, dentro do LAIR.
+    outros = soma(CODIGO_OUTROS)
     despesa_financeira = soma(CODIGO_DESPESA_FINANCEIRA)
-    lair = ebitda + despesa_financeira
+    lair = ebitda + outros + despesa_financeira
     imposto_renda = soma(CODIGO_IMPOSTO_RENDA)
     lucro_liquido = lair + imposto_renda
 

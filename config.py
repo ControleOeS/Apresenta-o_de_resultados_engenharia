@@ -96,6 +96,11 @@ DROPBOX_ASAP_REV01_MOD = "/REV01_ASAP_BASE_PREV_REFINADO_MD.xlsx"
 DROPBOX_ASAP_REV01_OTI = "/REV01_ASAP_BASE_PREV_REFINADO_OT.xlsx"
 DROPBOX_ASAP_REV02_MOD = "/ASAP_REV02_2026 Moderado.xlsx"
 DROPBOX_ASAP_REV02_OTI = "/ASAP_REV02_2026 Otimista.xlsx"
+# REV03: um único arquivo (aba "DePara_CC", linha a linha por Centro de
+# Custo com a classificação "Grupo DRE") usado como Moderado E Otimista —
+# pedido explícito do usuário, 2026-11-25 ("utilize esse valor como
+# moderado e otimista da ASAP"), não tem uma base Moderado separada ainda.
+DROPBOX_ASAP_REV03 = "/ASAP_REV03_2026 Otimista.xlsx"
 
 # Forecast manual da ASAP (grade de Receita Bruta/Lucro Bruto por Cliente,
 # mesma ideia do Forecast da Superus) — arquivo PRÓPRIO, não compartilhado
