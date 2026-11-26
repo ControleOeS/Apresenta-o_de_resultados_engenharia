@@ -18,7 +18,6 @@ from dados import (
     carregar_realizado_2025_mensal,
     carregar_realizado_superus,
     dre_2025_periodo,
-    previsto_mensal_ano,
 )
 from estilo import VERDE_ESCURO, VERMELHO, render_tabela_com_faixa
 from formatting import format_brl_md, format_pct_av, format_pp
@@ -395,14 +394,31 @@ def render() -> None:
     dre_total_ano = {campo: sum(dre_por_mes[mes][campo] for mes in dre_por_mes) for _, campo, _ in LINHAS_DRE_DEF}
     base_av_ano = dre_total_ano["receita_liquida"]
 
-    # Meta Otimista — trocado de META ANO SUPERUS.xlsx (meta estática) pro
-    # Orçado (Cenário Otimista) da Revisão "em vigor" (mesma Revisão usada pra
-    # Despesa no Forecast), ano inteiro — pedido do usuário, 2026-11-18. Campo
-    # sem base nenhuma pra algum mês vira None no total, nunca soma parcial.
-    orc_mensal_otimista = previsto_mensal_ano(df_previsto, df_refinado, df_real, revisao_atual, "Otimista", ano)
+    # Meta 2026 — trocada do Orçado (Cenário Otimista) da Revisão em vigor
+    # (REV03) pra meta oficial fixa aprovada, passada pelo usuário via DRE
+    # pronta (2026-11-26): "essa é a meta". Deixou de acompanhar a Revisão
+    # automaticamente (regra antiga, 2026-11-18) — agora é um alvo fixo pro
+    # ano inteiro, não recalculado a partir do Previsto/Refinado.
+    #
+    # Receita Líquida, Lucro Bruto e EBITDA batem exatos com os valores que o
+    # usuário passou (print de uma DRE "Total 2026"). LAIR e Lucro Líquido
+    # NÃO batiam com o print (diferença de R$842 nos dois, mesmo valor —
+    # sinal de arredondamento no print) — usamos o resultado da conta
+    # (EBITDA + Despesa Financeira, depois + Imposto de Renda) em vez do
+    # número exibido no print, por instrução do usuário ("faça por conta de
+    # chegada não arredondada" + confirmação explícita de qual valor usar).
     meta_total_ano = {
-        campo: (None if orc_mensal_otimista[campo].isna().any() else float(orc_mensal_otimista[campo].sum()))
-        for _, campo, _ in LINHAS_DRE_DEF
+        "receita_bruta": 252_412_454.0,
+        "imposto": -22_177_268.0,
+        "receita_liquida": 230_235_186.0,
+        "custo": -175_660_008.0,
+        "margem_bruta": 54_575_178.0,
+        "despesa_adm": -22_017_454.0,
+        "ebitda": 32_557_724.0,
+        "despesa_financeira": -9_051_005.0,
+        "lair": 23_506_719.0,
+        "imposto_renda": -7_650_665.0,
+        "lucro_liquido": 15_856_054.0,
     }
 
     # Realizado do ano anterior — comparação direta com o Forecast do ano
@@ -508,9 +524,8 @@ def render() -> None:
     st.caption(
         f"{MESES_PT[meses_fc[0].month]}-{MESES_PT[meses_fc[-1].month]}/{ano} = {_fonte_forecast_legenda}. "
         "Os gráficos de histórico 2022-2025 (parte de baixo da página 6) continuam bloqueados — essa "
-        "base só tem 2026. **Meta Otimista/Δ** = Orçado (Cenário Otimista) da Revisão em vigor "
-        f"(**{revisao_atual}**) pro ano inteiro — acompanha automaticamente a Revisão mais recente "
-        "conforme o ano avança; não entra em nenhum cálculo do Forecast; Δ = Forecast menos Meta. "
+        "base só tem 2026. **Meta/Δ** = meta oficial fixa aprovada pro ano inteiro (não acompanha "
+        "mais a Revisão automaticamente); não entra em nenhum cálculo do Forecast; Δ = Forecast menos Meta. "
         f"**Realizado {ano - 1}/Δ** = DRE fechada de {ano - 1} (RESULTADOS {ano - 1}.xlsx), ano inteiro, "
         f"só comparativo; Δ = Forecast {ano} menos Realizado {ano - 1}."
     )
