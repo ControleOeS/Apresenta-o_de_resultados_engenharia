@@ -662,26 +662,27 @@ def render() -> None:
             dre_forecast_total_ano = {campo: sum(dre_forecast_por_mes[m][campo] for m in dre_forecast_por_mes) for _, campo, _ in LINHAS_DRE_DEF}
             base_av_forecast_ano = dre_forecast_total_ano["receita_liquida"]
 
-            # Meta Otimista — trocado de META ANO SUPERUS.xlsx (meta estática)
-            # pro Orçado (Cenário Otimista) da Revisão "em vigor" (a mesma
-            # Revisão usada pra Despesa no Forecast acima), ano inteiro — pedido
-            # do usuário, 2026-11-18: a meta de referência passa a acompanhar
-            # automaticamente a Revisão mais recente conforme o ano avança
-            # (mesmo conceito de "Meta" já usado no Painel de Resultados do
-            # DASH_DIRETORIA). Usa previsto_mensal_ano, que já faz o blend
-            # Realizado/Previsto mês a mês (Orçado "efetivo"). Campo sem base
-            # nenhuma pra algum mês (Despesa ainda não cadastrada pra essa
-            # Revisão) vira None no total — nunca uma soma parcial enganosa.
-            # Colunas mais estreitas que a DRE Mês/Acumulado acima (tabela com
-            # mais colunas, Jan-Dez + Total + Meta + Δ + Real.25 + Δ) — usa
-            # helpers próprios (_td_fc/_td_valor_fc) em vez dos globais _td/
-            # _td_valor, pra não estreitar a tabela Mês/Acumulado também.
-            orc_mensal_otimista_app = previsto_mensal_ano(
-                df_previsto, df_refinado, df_real, revisao_atual_forecast_app, "Otimista", ano
-            )
+            # Meta 2026 — mesmo alvo fixo (DRE "Total 2026" aprovada) usado na
+            # aba Forecast (ver pagina_forecast.py, 2026-11-26: "essa é a
+            # meta" + conta de chegada pro LAIR/Lucro Líquido, que o print do
+            # usuário não fechava sozinho). Deixou de acompanhar o Orçado
+            # (Cenário Otimista) da Revisão em vigor automaticamente (regra
+            # antiga, 2026-11-18) — repetido aqui em vez de importado de
+            # pagina_forecast.py pra não criar acoplamento entre as duas
+            # páginas por causa de uma tabela que já é, por si só, quase-
+            # duplicada (ver comentário da tabela_forecast_html abaixo).
             meta_total_ano_app = {
-                campo: (None if orc_mensal_otimista_app[campo].isna().any() else float(orc_mensal_otimista_app[campo].sum()))
-                for _, campo, _ in LINHAS_DRE_DEF
+                "receita_bruta": 252_412_454.0,
+                "imposto": -22_177_268.0,
+                "receita_liquida": 230_235_186.0,
+                "custo": -175_660_008.0,
+                "margem_bruta": 54_575_178.0,
+                "despesa_adm": -22_017_454.0,
+                "ebitda": 32_557_724.0,
+                "despesa_financeira": -9_051_005.0,
+                "lair": 23_506_719.0,
+                "imposto_renda": -7_650_665.0,
+                "lucro_liquido": 15_856_054.0,
             }
 
             # Realizado 2025 — comparação direta com o Forecast 2026 (ano
@@ -760,7 +761,7 @@ def render() -> None:
             tabela_forecast_html = (
                 "<table style='width:100%; border-collapse:collapse; font-size:0.8rem; color:#1a1a1a;'>"
                 f"<tr><th style='{TH_ROTULO}'>DRE - Superus Engenharia</th>{cabecalho_forecast}<th style='{TH_VALOR_FC}'>Total {ano}</th>"
-                f"{_espacador_th()}<th style='{TH_META}'>Meta Otimista</th><th style='{TH_DELTA}'>Δ Forecast-Meta</th>"
+                f"{_espacador_th()}<th style='{TH_META}'>Meta</th><th style='{TH_DELTA}'>Δ Forecast-Meta</th>"
                 f"{_espacador_th()}<th style='{TH_META}'>Realizado {ano - 1}</th><th style='{TH_DELTA}'>Δ Forecast-Real.{str(ano - 1)[2:]}</th></tr>"
                 + "".join(linhas_forecast_html)
                 + "</table>"
@@ -781,9 +782,8 @@ def render() -> None:
                 f"Jan-{MESES_PT[meses_realizado_app[-1].month]}/{ano} = Realizado fechado; "
                 f"{MESES_PT[meses_fc_app[0].month]}-{MESES_PT[meses_fc_app[-1].month]}/{ano} = "
                 f"{_fonte_forecast_legenda}, Revisão em vigor "
-                f"**{revisao_atual_forecast_app}** pra Despesa. **Meta Otimista/Δ** = Orçado (Cenário "
-                f"Otimista) da Revisão em vigor (**{revisao_atual_forecast_app}**) pro ano inteiro — "
-                "acompanha automaticamente a Revisão mais recente conforme o ano avança; não entra em "
+                f"**{revisao_atual_forecast_app}** pra Despesa. **Meta/Δ** = meta oficial fixa aprovada "
+                "pro ano inteiro (não acompanha mais a Revisão automaticamente); não entra em "
                 f"nenhum cálculo do Forecast; Δ = Forecast menos Meta. **Realizado {ano - 1}/Δ** = DRE "
                 f"fechada de {ano - 1} (RESULTADOS {ano - 1}.xlsx), ano inteiro, só comparativo; Δ = "
                 f"Forecast {ano} menos Realizado {ano - 1}."

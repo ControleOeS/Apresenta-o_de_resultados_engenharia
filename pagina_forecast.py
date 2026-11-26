@@ -502,7 +502,7 @@ def render() -> None:
     tabela_dre_html = (
         "<table style='width:100%; border-collapse:collapse; font-size:0.8rem; color:#1a1a1a;'>"
         f"<tr><th style='{TH_ROTULO}'>DRE - Superus Engenharia</th>{cabecalho_meses}<th style='{TH_VALOR}'>Total {ano}</th>"
-        f"{_espacador_th()}<th style='{TH_META}'>Meta Otimista</th><th style='{TH_DELTA}'>Δ Forecast-Meta</th>"
+        f"{_espacador_th()}<th style='{TH_META}'>Meta</th><th style='{TH_DELTA}'>Δ Forecast-Meta</th>"
         f"{_espacador_th()}<th style='{TH_META}'>Realizado {ano - 1}</th><th style='{TH_DELTA}'>Δ Forecast-Real.{str(ano - 1)[2:]}</th></tr>"
         + "".join(linhas_html)
         + "</table>"
